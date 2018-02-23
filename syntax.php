@@ -39,6 +39,7 @@ class syntax_plugin_structodt extends syntax_plugin_struct_table {
 
         if ($mode == 'metadata') {
             $renderer->meta['plugin']['structodt']['odt'] = $data['odt'];
+            $renderer->meta['plugin']['structodt']['schemas'] = $data['schemas'];
         }
     }
 

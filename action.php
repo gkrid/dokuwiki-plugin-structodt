@@ -6,6 +6,10 @@
  * @author  Szymon Olewniczak <it@rid.pl>
  */
 
+use dokuwiki\plugin\struct\meta\Search;
+use \splitbrain\PHPArchive\Zip;
+use \splitbrain\PHPArchive\FileInfo;
+
 // must be run within Dokuwiki
 if(!defined('DOKU_INC')) die();
 
@@ -68,10 +72,16 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
 
         $meta = p_get_metadata($ID, 'plugin structodt');
         $template = $meta['odt'];
+        $schemas = $meta['schemas'];
         $pid = $INPUT->str('pid');
 
-        $tmp_file = $this->renderODT($pid, $template);
-        $this->sendODTFile($tmp_file, noNS($pid));
+        $tmp_file = $this->renderODT($template, $schemas, $pid);
+        if ($tmp_file) {
+            $this->sendODTFile($tmp_file, noNS($pid));
+
+            //TODO: remove template file
+            exit();
+        }
     }
 
     /**
@@ -81,16 +91,49 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      *
      * @return string
      */
-    protected function renderODT($pid, $template) {
+    protected function renderODT($template, $schemas, $pid) {
         global $conf;
 
-        $file = mediaFN($template);
+        $template_file = mediaFN($template);
+        $tmp_dir = $conf['tmpdir'] . '/structodt/' . uniqid() . '/';
+        if (!mkdir($tmp_dir, 0777, true)) {
+            msg("could not create tmp dir - bad permissions?", -1);
+            return false;
+        }
 
-        return $file;
+        $template_zip = new Zip();
+        $template_zip->open($template_file);
+        $template_zip->extract($tmp_dir);
 
-        //$cachefile = tempnam($conf['tmpdir'] . '/structodt', 'structodt_');
+        //do replacements
+        $content_file = $tmp_dir . 'content.xml';
+        $content = file_get_contents($content_file);
+        $content = $this->replace($content, $schemas, $pid);
+        file_put_contents($content_file, $content);
+
+        $tmp_file = $conf['tmpdir'] . '/structodt/' . uniqid() . '.odt';
+
+        $tmp_zip = new Zip();
+        $tmp_zip->create($tmp_file);
+        foreach($this->readdir_recursive($tmp_dir) as $file) {
+            $fileInfo = FileInfo::fromPath($file);
+            $fileInfo->strip(substr($tmp_dir, 1));
+            $tmp_zip->addFile($file, $fileInfo);
+        }
+        $tmp_zip->close();
+
+        //remove temp dir
+        $this->rmdir_recursive($tmp_dir);
+
+        return $tmp_file;
     }
 
+    /**
+     * Send ODT file using range request
+     *
+     * @param $tmp_file string path of sending file
+     * @param $filename string name of sending file
+     */
     protected function sendODTFile($tmp_file, $filename) {
         header('Content-Type: application/odt');
         header('Content-Disposition: attachment; filename="' . $filename . '.odt";');
@@ -104,9 +147,101 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
             header("HTTP/1.0 500 Internal Server Error");
             print "Could not read file - bad permissions?";
         }
-        exit();
     }
 
+    /**
+     * Read directory recursively
+     *
+     * @param string $path
+     * @return array of file full paths
+     */
+    protected function readdir_recursive($path) {
+        $directory = new \RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS);
+        $iterator = new \RecursiveIteratorIterator($directory);
+        $files = array();
+        foreach ($iterator as $info) {
+            if ($info->isFile()) {
+                $files[] = $info->getPathname();
+            }
+        }
+
+        return $files;
+    }
+
+    /**
+     * Remove director recursively
+     *
+     * @param $path
+     */
+    protected function rmdir_recursive($path) {
+        $directory = new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS);
+        $iterator = new RecursiveIteratorIterator($directory,
+                                               RecursiveIteratorIterator::CHILD_FIRST);
+        foreach($iterator as $file) {
+            if ($file->isDir()){
+                rmdir($file->getRealPath());
+            } else {
+                unlink($file->getRealPath());
+            }
+        }
+        rmdir($path);
+    }
+
+    /**
+     * Perform template replacements
+     *
+     * @param string $content
+     * @param string $schemas
+     * @param string $pid
+     * @return string
+     */
+    protected function replace($content, $schemas, $pid) {
+        global $ID;
+
+        $search = new Search();
+        if(!empty($schemas)) foreach($schemas as $schema) {
+            $search->addSchema($schema[0], $schema[1]);
+        }
+        $search->addColumn('*');
+        $first_schema = $search->getSchemas()[0];
+        if ($first_schema->isLookup()) {
+            $search->addFilter('%rowid%', $pid, '=');
+        } else {
+            $search->addFilter('%pageid%', $pid, '=');
+
+            $search->addColumn('%pageid%');
+            $search->addColumn('%title%');
+            $search->addColumn('%lastupdate%');
+            $search->addColumn('%lasteditor%');
+        }
+
+        $search->addFilter('pid', $pid, '=');
+        $result = $search->execute()[0];
+
+        foreach ($result as $value) {
+            $label = $value->getColumn()->getLabel();
+            $pattern = '/@@' . preg_quote($label) . '(?:\[(\d+)\])?@@/';
+            $content = preg_replace_callback($pattern, function($matches) use ($value) {
+                $dvalue = $value->getDisplayValue();
+                if (isset($matches[1])) {
+                    $index = (int)$matches[1];
+                    if (!is_array($dvalue)) {
+                        $dvalue = array_map('trim', explode(',', $dvalue));
+                    }
+                    if (isset($dvalue[$index])) {
+                        return $dvalue[$index];
+                    }
+                    return 'Array: index out of bound';
+                }
+                if (is_array($dvalue)) {
+                    return implode(',', $dvalue);
+                }
+                return $dvalue;
+            }, $content);
+        }
+
+        return $content;
+    }
 }
 
 // vim:ts=4:sw=4:et:
