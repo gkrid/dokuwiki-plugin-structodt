@@ -24,25 +24,6 @@ class syntax_plugin_structodt extends syntax_plugin_struct_table {
     public function connectTo($mode) {
         $this->Lexer->addSpecialPattern('----+ *struct odt *-+\n.*?\n----+', $mode, 'plugin_structodt');
     }
-
-    /**
-     * Render xhtml output or metadata
-     *
-     * @param string $mode Renderer mode (supported modes: xhtml)
-     * @param Doku_Renderer $renderer The renderer
-     * @param array $data The data from the handler() function
-     *
-     * @return bool If rendering was successful.
-     */
-    public function render($mode, Doku_Renderer $renderer, $data) {
-        parent::render($mode, $renderer, $data);
-
-        if ($mode == 'metadata') {
-            $renderer->meta['plugin']['structodt']['odt'] = $data['odt'];
-            $renderer->meta['plugin']['structodt']['schemas'] = $data['schemas'];
-        }
-    }
-
 }
 
 // vim:ts=4:sw=4:et:

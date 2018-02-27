@@ -40,7 +40,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         global $ID;
         $data = $event->data;
 
-        if ($data['key'] != 'odt') return;
+        if ($data['key'] != 'template') return;
 
         $event->preventDefault();
         $event->stopPropagation();
@@ -53,7 +53,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
             return;
         }
 
-        $data['config']['odt'] = $media;
+        $data['config']['template'] = $media;
     }
 
 
@@ -67,19 +67,17 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      */
 
     public function handle_action_act_prerpocess(Doku_Event &$event, $param) {
-        global $INPUT, $ID;
+        global $INPUT;
         if ($event->data != 'structodt') return;
 
-        $meta = p_get_metadata($ID, 'plugin structodt');
-        $template = $meta['odt'];
-        $schemas = $meta['schemas'];
+        $template = $INPUT->str('template');
+        $schemas = $INPUT->arr('schema');
         $pid = $INPUT->str('pid');
 
         $tmp_file = $this->renderODT($template, $schemas, $pid);
         if ($tmp_file) {
             $this->sendODTFile($tmp_file, noNS($pid));
-
-            //TODO: remove template file
+            unlink($tmp_file);
             exit();
         }
     }
@@ -142,6 +140,8 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
 
         $fp = @fopen($tmp_file, "rb");
         if($fp) {
+            //we have to remove file before exit
+            define('SIMPLE_TEST', true);
             http_rangeRequest($fp, filesize($tmp_file), 'application/odt');
         } else {
             header("HTTP/1.0 500 Internal Server Error");
