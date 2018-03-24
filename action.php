@@ -104,10 +104,14 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         $template_zip->extract($tmp_dir);
 
         //do replacements
-        $content_file = $tmp_dir . 'content.xml';
-        $content = file_get_contents($content_file);
-        $content = $this->replace($content, $schemas, $pid);
-        file_put_contents($content_file, $content);
+        $files = array('content.xml', 'styles.xml');
+        foreach ($files as $file) {
+            $content_file = $tmp_dir . $file;
+            $content = file_get_contents($content_file);
+            $content = $this->replace($content, $schemas, $pid);
+            file_put_contents($content_file, $content);
+        }
+
 
         $tmp_file = $conf['tmpdir'] . '/structodt/' . uniqid() . '.odt';
 
