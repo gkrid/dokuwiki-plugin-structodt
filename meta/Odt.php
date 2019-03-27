@@ -11,6 +11,9 @@ class Odt extends AggregationTable {
     /** @var  string odt file used as export template */
     protected $template;
 
+    /** @var bool should we display delete button for lookup schemas */
+    protected $delete;
+
     /**
      * Initialize the Aggregation renderer and executes the search
      *
@@ -26,6 +29,7 @@ class Odt extends AggregationTable {
 
         $conf = $searchConfig->getConf();
         $this->template = $conf['template'];
+        $this->delete = $conf['delete'];
     }
 
     /**
@@ -35,8 +39,6 @@ class Odt extends AggregationTable {
      * @param array $row
      */
     protected function renderResultRow($rownum, $row) {
-        global $ID;
-
         parent::renderResultRow($rownum, $row);
         //remove tablerow_close
         $doc_len = strlen($this->renderer->doc);
@@ -45,26 +47,63 @@ class Odt extends AggregationTable {
         $tablerow_close_len = strlen($this->renderer->doc) - $doc_len;
         $this->renderer->doc = substr($this->renderer->doc, 0,  -2*$tablerow_close_len);
 
-        if($this->mode == 'xhtml') {
+        if ($this->mode == 'xhtml') {
             $pid = $this->resultPIDs[$rownum];
-
-            $this->renderer->tablecell_open();
-            $icon = DOKU_PLUGIN . 'structodt/images/odt.svg';
-            $urlParameters = array('do' => 'structodt',
-                                   'template' => $this->template,
-                                   'pid' => hsc($pid));
-
-            foreach($this->data['schemas'] as $key => $schema) {
-                $urlParameters['schema[' . $key . '][0]'] = $schema[0];
-                $urlParameters['schema[' . $key . '][1]'] = $schema[1];
+            $this->renderOdtButton($pid);
+            if ($this->delete) {
+                $this->renderDeleteButton($pid);
             }
-
-            $href = wl($ID, $urlParameters);
-            $title = 'ODT export';
-            $this->renderer->doc .= '<a href="' . $href . '" title="' . $title . '">' . inlineSVG($icon) . '</a>';
-            $this->renderer->tablecell_close();
         }
 
         $this->renderer->tablerow_close();
+    }
+
+    /**
+     * @param $pid
+     */
+    protected function renderOdtButton($pid) {
+        global $ID;
+
+        $this->renderer->tablecell_open();
+        $icon = DOKU_PLUGIN . 'structodt/images/odt.svg';
+        $urlParameters = array('do' => 'structodt',
+            'action' => 'render',
+            'template' => $this->template,
+            'pid' => hsc($pid));
+
+        foreach($this->data['schemas'] as $key => $schema) {
+            $urlParameters['schema[' . $key . '][0]'] = $schema[0];
+            $urlParameters['schema[' . $key . '][1]'] = $schema[1];
+        }
+
+        $href = wl($ID, $urlParameters);
+        $title = 'ODT export';
+        $this->renderer->doc .= '<a href="' . $href . '" title="' . $title . '">' . inlineSVG($icon) . '</a>';
+        $this->renderer->tablecell_close();
+    }
+
+    /**
+     * @param $pid
+     */
+    protected function renderDeleteButton($pid) {
+        global $ID;
+
+        $schemas = $this->searchConfig->getSchemas();
+        // we don't know exact schama
+        if (count($schemas) > 1) return;
+        $schema = $schemas[0];
+        //only lookup support deletion
+        if (!$schema->isLookup()) return;
+
+        $this->renderer->tablecell_open();
+        $urlParameters['do'] = 'structodt';
+        $urlParameters['action'] = 'delete';
+        $urlParameters['schema'] = $schema->getTable();
+        $urlParameters['pid'] = $pid;
+        $urlParameters['sectok'] = getSecurityToken();
+
+        $href = wl($ID, $urlParameters);
+        $this->renderer->doc .= '<a href="'.$href.'"><button><i class="ui-icon ui-icon-trash"></i></button></a>';
+        $this->renderer->tablecell_close();
     }
 }

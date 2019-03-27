@@ -6,7 +6,9 @@
  * @author  Szymon Olewniczak <it@rid.pl>
  */
 
+use dokuwiki\plugin\struct\meta\AccessTable;
 use dokuwiki\plugin\struct\meta\Search;
+use dokuwiki\plugin\struct\meta\StructException;
 use \splitbrain\PHPArchive\Zip;
 use \splitbrain\PHPArchive\FileInfo;
 
@@ -22,13 +24,13 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      * @return void
      */
     public function register(Doku_Event_Handler $controller) {
-        $controller->register_hook('PLUGIN_STRUCT_CONFIGPARSER_UNKNOWNKEY', 'BEFORE', $this, 'handle_configparser');
+        $controller->register_hook('PLUGIN_STRUCT_CONFIGPARSER_UNKNOWNKEY', 'BEFORE', $this, 'handle_strut_configparser_template');
+        $controller->register_hook('PLUGIN_STRUCT_CONFIGPARSER_UNKNOWNKEY', 'BEFORE', $this, 'handle_strut_configparser_delete');
         $controller->register_hook('ACTION_ACT_PREPROCESS', 'BEFORE', $this, 'handle_action_act_prerpocess');
-
     }
 
     /**
-     * Add our own config keys
+     * Add "template" config key
      *
      * @param Doku_Event $event  event object by reference
      * @param mixed      $param  [the parameters passed as fifth argument to register_hook() when this
@@ -36,7 +38,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      * @return void
      */
 
-    public function handle_configparser(Doku_Event &$event, $param) {
+    public function handle_strut_configparser_template(Doku_Event &$event, $param) {
         global $ID;
         $data = $event->data;
 
@@ -56,9 +58,8 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         $data['config']['template'] = $media;
     }
 
-
     /**
-     * Handle odt export
+     * Add "delete" config key
      *
      * @param Doku_Event $event  event object by reference
      * @param mixed      $param  [the parameters passed as fifth argument to register_hook() when this
@@ -66,9 +67,44 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      * @return void
      */
 
+    public function handle_strut_configparser_delete(Doku_Event &$event, $param) {
+        $data = $event->data;
+
+        if ($data['key'] != 'delete') return;
+
+        $event->preventDefault();
+        $event->stopPropagation();
+
+        $data['config']['delete'] = (bool)$data['val'];
+    }
+
+
+    /**
+     * Handle odt export
+     *
+     * @param Doku_Event $event event object by reference
+     * @param mixed $param [the parameters passed as fifth argument to register_hook() when this
+     *                           handler was registered]
+     * @return void
+     * @throws \splitbrain\PHPArchive\ArchiveIOException
+     * @throws \splitbrain\PHPArchive\FileInfoException
+     */
+
     public function handle_action_act_prerpocess(Doku_Event &$event, $param) {
         global $INPUT;
         if ($event->data != 'structodt') return;
+
+        $method = 'action_' . $INPUT->str('action');
+        if (method_exists($this, $method)) {
+            call_user_func(array($this, $method));
+        }
+    }
+
+    /**
+     *
+     */
+    protected function action_render() {
+        global $INPUT;
 
         $template = $INPUT->str('template');
         $schemas = $INPUT->arr('schema');
@@ -83,11 +119,39 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
     }
 
     /**
+     *
+     */
+    protected function action_delete() {
+        global $INPUT, $ID;
+        $tablename = $INPUT->str('schema');
+        $pid = $INPUT->int('pid');
+        if (!$pid) {
+            throw new StructException('No pid given');
+        }
+        if (!$tablename) {
+            throw new StructException('No schema given');
+        }
+        action_plugin_struct_inline::checkCSRF();
+
+        $schemadata = AccessTable::byTableName($tablename, $pid);
+        if (!$schemadata->getSchema()->isEditable()) {
+            throw new StructException('lookup delete error: no permission for schema');
+        }
+        $schemadata->clearData();
+
+        header("Location: " . wl($ID));
+    }
+
+    /**
      * Render ODT file from template
      *
+     * @param $template
+     * @param $schemas
      * @param $pid
      *
      * @return string
+     * @throws \splitbrain\PHPArchive\ArchiveIOException
+     * @throws \splitbrain\PHPArchive\FileInfoException
      */
     protected function renderODT($template, $schemas, $pid) {
         global $conf;
@@ -200,8 +264,6 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      * @return string
      */
     protected function replace($content, $schemas, $pid) {
-        global $ID;
-
         $search = new Search();
         if(!empty($schemas)) foreach($schemas as $schema) {
             $search->addSchema($schema[0], $schema[1]);
