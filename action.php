@@ -294,7 +294,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
                 if (isset($matches[1])) {
                     $index = (int)$matches[1];
                     if (!is_array($dvalue)) {
-                        $dvalue = array_map('trim', explode(',', $dvalue));
+                        $dvalue = array_map('trim', explode('|', $dvalue));
                     }
                     if (isset($dvalue[$index])) {
                         return $dvalue[$index];
