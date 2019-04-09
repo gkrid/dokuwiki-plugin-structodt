@@ -272,6 +272,8 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         $first_schema = $search->getSchemas()[0];
         if ($first_schema->isLookup()) {
             $search->addFilter('%rowid%', $pid, '=');
+
+            $search->addColumn('%rowid%');
         } else {
             $search->addFilter('%pageid%', $pid, '=');
 
