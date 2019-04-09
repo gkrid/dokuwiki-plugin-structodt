@@ -172,6 +172,10 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         foreach ($files as $file) {
             $content_file = $tmp_dir . $file;
             $content = file_get_contents($content_file);
+            if ($content === false) {
+                msg("Cannot open: $content_file", -1);
+                return false;
+            }
             $content = $this->replace($content, $schemas, $pid);
             file_put_contents($content_file, $content);
         }
