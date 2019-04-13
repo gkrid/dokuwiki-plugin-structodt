@@ -39,7 +39,6 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      */
 
     public function handle_strut_configparser_template(Doku_Event &$event, $param) {
-        global $ID;
         $data = $event->data;
 
         if ($data['key'] != 'template') return;
@@ -48,13 +47,6 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         $event->stopPropagation();
 
         $media = trim($data['val']);
-        resolve_mediaid(getNS($ID), $media, $exists);
-
-        if (!$exists) {
-            msg("<strong>structodt</strong>: template file doesn't exist", -1);
-            return;
-        }
-
         $data['config']['template'] = $media;
     }
 

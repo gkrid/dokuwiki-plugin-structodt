@@ -49,7 +49,7 @@ class Odt extends AggregationTable {
 
         if ($this->mode == 'xhtml') {
             $pid = $this->resultPIDs[$rownum];
-            $this->renderOdtButton($pid);
+            $this->renderOdtButton($rownum);
             if ($this->delete) {
                 $this->renderDeleteButton($pid);
             }
@@ -61,14 +61,39 @@ class Odt extends AggregationTable {
     /**
      * @param $pid
      */
-    protected function renderOdtButton($pid) {
+    protected function renderOdtButton($rownum) {
         global $ID;
+
+        $pid = $this->resultPIDs[$rownum];
+
+        /** @var Value[] $result */
+        $result = $this->result[$rownum];
+        //do media file substitutions
+        $media = preg_replace_callback('/\$(.*?)\$/', function ($matches) use ($result) {
+            $possibleValueTypes = array('getValue', 'getCompareValue', 'getDisplayValue', 'getRawValue');
+            list($label, $valueType) = explode('.', $matches[1], 2);
+            if (!$valueType || !in_array($valueType, $possibleValueTypes)) {
+                $valueType = 'getDisplayValue';
+            }
+            foreach ($result as $value) {
+                $column = $value->getColumn();
+                if ($column->getLabel() == $label) {
+                    return call_user_func(array($value, $valueType));
+                }
+            }
+            return '';
+        }, $this->template);
+
+        resolve_mediaid(getNS($ID), $media, $exists);
+        if (!$exists) {
+            msg("<strong>structodt</strong>: template file($media) doesn't exist", -1);
+        }
 
         $this->renderer->tablecell_open();
         $icon = DOKU_PLUGIN . 'structodt/images/odt.svg';
         $urlParameters = array('do' => 'structodt',
             'action' => 'render',
-            'template' => $this->template,
+            'template' => $media,
             'pid' => hsc($pid));
 
         foreach($this->data['schemas'] as $key => $schema) {
