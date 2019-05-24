@@ -83,7 +83,8 @@ class Odt extends AggregationTable {
             $icon = DOKU_BASE.'lib/images/fileicons/'.$size.'/file.png';
         }
 
-        return '<img src="'.$icon.'" alt="'.$ext.'" class="icon" />';
+        //max-width - fix chrome not showing the image
+        return '<img src="'.$icon.'" alt="'.$ext.'" class="icon" style="max-width:none;" />';
     }
 
     /**
