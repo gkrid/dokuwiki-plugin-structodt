@@ -163,4 +163,29 @@ class Odt extends AggregationTable {
         $this->renderer->doc .= '<a href="'.$href.'"><button><i class="ui-icon ui-icon-trash"></i></button></a>';
         $this->renderer->tablecell_close();
     }
+
+    /**
+     * Adds PDF export controls
+     */
+    protected function renderExportControls() {
+        parent::renderExportControls();
+
+        if($this->mode != 'xhtml') return;
+        if(!$this->data['pdf']) return;
+        if(!$this->resultCount) return;
+
+        $dynamic = $this->searchConfig->getDynamicParameters();
+        $params = $dynamic->getURLParameters();
+        $params['hash'] = $this->renderer->info['struct_table_hash'];
+
+        // FIXME apply dynamic filters
+        $link = exportlink($this->id, 'struct_pdf', $params);
+
+        $style='';
+        if (!empty($this->data['csv'])) {
+            $style='style="margin-left: 10em;"';
+        }
+
+        $this->renderer->doc .= '<a href="' . $link . '" class="export mediafile mf_pdf" ' . $style . '>'.$this->helper_structodt->getLang('btn_downloadAll').'</a>';
+    }
 }
