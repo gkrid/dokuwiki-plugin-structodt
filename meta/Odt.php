@@ -18,6 +18,11 @@ class Odt extends AggregationTable {
     protected $pdf;
 
     /**
+     * @var \helper_plugin_structodt
+     */
+    protected $helper_structodt;
+
+    /**
      * Initialize the Aggregation renderer and executes the search
      *
      * You need to call @see render() on the resulting object.
@@ -34,6 +39,7 @@ class Odt extends AggregationTable {
         $this->template = $conf['template'];
         $this->delete = $conf['delete'];
         $this->pdf = $conf['pdf'];
+        $this->helper_structodt = plugin_load('helper', 'structodt');
     }
 
     /**
@@ -60,6 +66,24 @@ class Odt extends AggregationTable {
         }
 
         $this->renderer->tablerow_close();
+    }
+
+    /**
+     * Display a media icon
+     *
+     * @param string $filename media id
+     * @param string $size     the size subfolder, if not specified 16x16 is used
+     * @return string html
+     */
+    public static function media_printicon($ext, $size=''){
+
+        if (file_exists(DOKU_INC.'lib/images/fileicons/'.$size.'/'.$ext.'.png')) {
+            $icon = DOKU_BASE.'lib/images/fileicons/'.$size.'/'.$ext.'.png';
+        } else {
+            $icon = DOKU_BASE.'lib/images/fileicons/'.$size.'/file.png';
+        }
+
+        return '<img src="'.$icon.'" alt="'.$ext.'" class="icon" />';
     }
 
     /**
@@ -94,7 +118,7 @@ class Odt extends AggregationTable {
         }
 
         $this->renderer->tablecell_open();
-        $icon = DOKU_PLUGIN . 'structodt/images/odt.svg';
+        $ext = $this->pdf ? 'pdf' : pathinfo($media, PATHINFO_EXTENSION);
         $urlParameters = array(
             'do' => 'structodt',
             'action' => 'render',
@@ -108,8 +132,10 @@ class Odt extends AggregationTable {
         }
 
         $href = wl($ID, $urlParameters);
-        $title = 'ODT export';
-        $this->renderer->doc .= '<a href="' . $href . '" title="' . $title . '">' . inlineSVG($icon) . '</a>';
+        $title = $this->helper_structodt->getLang('btn_download');
+        $this->renderer->doc .= '<a href="' . $href . '" title="' . $title . '">';
+        $this->renderer->doc .= self::media_printicon($ext);
+        $this->renderer->doc .= '</a>';
         $this->renderer->tablecell_close();
     }
 
