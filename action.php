@@ -24,8 +24,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      * @return void
      */
     public function register(Doku_Event_Handler $controller) {
-        $controller->register_hook('PLUGIN_STRUCT_CONFIGPARSER_UNKNOWNKEY', 'BEFORE', $this, 'handle_strut_configparser_template');
-        $controller->register_hook('PLUGIN_STRUCT_CONFIGPARSER_UNKNOWNKEY', 'BEFORE', $this, 'handle_strut_configparser_delete');
+        $controller->register_hook('PLUGIN_STRUCT_CONFIGPARSER_UNKNOWNKEY', 'BEFORE', $this, 'handle_strut_configparser');
         $controller->register_hook('ACTION_ACT_PREPROCESS', 'BEFORE', $this, 'handle_action_act_prerpocess');
     }
 
@@ -38,38 +37,39 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      * @return void
      */
 
-    public function handle_strut_configparser_template(Doku_Event &$event, $param) {
+    public function handle_strut_configparser(Doku_Event &$event, $param) {
+        $keys = array('template', 'delete', 'pdf');
         $data = $event->data;
 
-        if ($data['key'] != 'template') return;
+        $key = $data['key'];
+        $val = trim($data['val']);
+
+        if (!in_array($key, $keys)) return;
 
         $event->preventDefault();
         $event->stopPropagation();
 
-        $media = trim($data['val']);
-        $data['config']['template'] = $media;
+        switch ($key) {
+            case 'template':
+                $data['config'][$key] = $val;
+                break;
+            case 'delete':
+                $data['config'][$key] = (bool)$val;
+                break;
+            case 'pdf':
+                if (!$val) {
+                    $data['config'][$key] = false;
+                } else {
+                    //check for "unoconv"
+                    $val = shell_exec('command -v unoconv');
+                    if (empty($val)) {
+                        msg('Cannot locate "unoconv". Falling back to ODT mode.', 0);
+                    }
+                    $data['config'][$key] = (bool)$val;
+                }
+                break;
+        }
     }
-
-    /**
-     * Add "delete" config key
-     *
-     * @param Doku_Event $event  event object by reference
-     * @param mixed      $param  [the parameters passed as fifth argument to register_hook() when this
-     *                           handler was registered]
-     * @return void
-     */
-
-    public function handle_strut_configparser_delete(Doku_Event &$event, $param) {
-        $data = $event->data;
-
-        if ($data['key'] != 'delete') return;
-
-        $event->preventDefault();
-        $event->stopPropagation();
-
-        $data['config']['delete'] = (bool)$data['val'];
-    }
-
 
     /**
      * Handle odt export
@@ -99,15 +99,29 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         global $INPUT;
 
         $template = $INPUT->str('template');
+        $ext = $INPUT->bool('pdf') ? 'pdf' : 'odt';
         $schemas = $INPUT->arr('schema');
         $pid = $INPUT->str('pid');
 
         $tmp_file = $this->renderODT($template, $schemas, $pid);
-        if ($tmp_file) {
-            $this->sendODTFile($tmp_file, noNS($pid));
+        if (!$tmp_file) return;
+
+        if ($ext == 'pdf') {
+            $wd = dirname($tmp_file);
+            $bn = basename($tmp_file);
+            $cmd = "cd $wd && HOME=$wd unoconv -f pdf $bn 2>&1";
+            exec($cmd, $output, $return_var);
             unlink($tmp_file);
-            exit();
+            if ($return_var != 0) {
+                msg("PDF conversion error($return_var): " . implode('<br>', $output), -1);
+                return;
+            }
+            //change extension to pdf
+            $tmp_file = substr($tmp_file, 0, -3) . 'pdf';
         }
+        $this->sendFile($tmp_file, noNS($pid), $ext);
+        unlink($tmp_file);
+        exit();
     }
 
     /**
@@ -195,10 +209,12 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      *
      * @param $tmp_file string path of sending file
      * @param $filename string name of sending file
+     * $param $ext odt or pdf
      */
-    protected function sendODTFile($tmp_file, $filename) {
-        header('Content-Type: application/odt');
-        header('Content-Disposition: attachment; filename="' . $filename . '.odt";');
+    protected function sendFile($tmp_file, $filename, $ext='odt') {
+        $mime = "application/$ext";
+        header("Content-Type: $mime");
+        header("Content-Disposition: attachment; filename=\"$filename.$ext\";");
 
         http_sendfile($tmp_file);
 
@@ -206,7 +222,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         if($fp) {
             //we have to remove file before exit
             define('SIMPLE_TEST', true);
-            http_rangeRequest($fp, filesize($tmp_file), 'application/odt');
+            http_rangeRequest($fp, filesize($tmp_file), $mime);
         } else {
             header("HTTP/1.0 500 Internal Server Error");
             print "Could not read file - bad permissions?";

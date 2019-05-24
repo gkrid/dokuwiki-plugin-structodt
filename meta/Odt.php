@@ -14,6 +14,9 @@ class Odt extends AggregationTable {
     /** @var bool should we display delete button for lookup schemas */
     protected $delete;
 
+    /** @var bool download rendered files as PDFs */
+    protected $pdf;
+
     /**
      * Initialize the Aggregation renderer and executes the search
      *
@@ -30,6 +33,7 @@ class Odt extends AggregationTable {
         $conf = $searchConfig->getConf();
         $this->template = $conf['template'];
         $this->delete = $conf['delete'];
+        $this->pdf = $conf['pdf'];
     }
 
     /**
@@ -91,9 +95,11 @@ class Odt extends AggregationTable {
 
         $this->renderer->tablecell_open();
         $icon = DOKU_PLUGIN . 'structodt/images/odt.svg';
-        $urlParameters = array('do' => 'structodt',
+        $urlParameters = array(
+            'do' => 'structodt',
             'action' => 'render',
             'template' => $media,
+            'pdf' => $this->pdf,
             'pid' => hsc($pid));
 
         foreach($this->data['schemas'] as $key => $schema) {
