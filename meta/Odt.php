@@ -88,6 +88,37 @@ class Odt extends AggregationTable {
     }
 
     /**
+     * @param $row
+     * @param string $template
+     * @return string
+     */
+    public static function rowTemplate($row, $template) {
+        global $ID;
+
+        //do media file substitutions
+        $media = preg_replace_callback('/\$(.*?)\$/', function ($matches) use ($row) {
+            $possibleValueTypes = array('getValue', 'getCompareValue', 'getDisplayValue', 'getRawValue');
+            list($label, $valueType) = explode('.', $matches[1], 2);
+            if (!$valueType || !in_array($valueType, $possibleValueTypes)) {
+                $valueType = 'getDisplayValue';
+            }
+            foreach ($row as $value) {
+                $column = $value->getColumn();
+                if ($column->getLabel() == $label) {
+                    return call_user_func(array($value, $valueType));
+                }
+            }
+            return '';
+        }, $template);
+
+        resolve_mediaid(getNS($ID), $media, $exists);
+        if (!$exists) {
+            msg("<strong>structodt</strong>: template file($media) doesn't exist", -1);
+        }
+        return $media;
+    }
+
+    /**
      * @param $pid
      */
     protected function renderOdtButton($rownum) {
@@ -95,28 +126,9 @@ class Odt extends AggregationTable {
 
         $pid = $this->resultPIDs[$rownum];
 
-        /** @var Value[] $result */
-        $result = $this->result[$rownum];
-        //do media file substitutions
-        $media = preg_replace_callback('/\$(.*?)\$/', function ($matches) use ($result) {
-            $possibleValueTypes = array('getValue', 'getCompareValue', 'getDisplayValue', 'getRawValue');
-            list($label, $valueType) = explode('.', $matches[1], 2);
-            if (!$valueType || !in_array($valueType, $possibleValueTypes)) {
-                $valueType = 'getDisplayValue';
-            }
-            foreach ($result as $value) {
-                $column = $value->getColumn();
-                if ($column->getLabel() == $label) {
-                    return call_user_func(array($value, $valueType));
-                }
-            }
-            return '';
-        }, $this->template);
-
-        resolve_mediaid(getNS($ID), $media, $exists);
-        if (!$exists) {
-            msg("<strong>structodt</strong>: template file($media) doesn't exist", -1);
-        }
+        /** @var Value[] $row */
+        $row = $this->result[$rownum];
+        $media = self::rowTemplate($row, $this->template);
 
         $this->renderer->tablecell_open();
         $ext = $this->pdf ? 'pdf' : pathinfo($media, PATHINFO_EXTENSION);
@@ -169,24 +181,33 @@ class Odt extends AggregationTable {
      * Adds PDF export controls
      */
     protected function renderExportControls() {
+        global $ID;
+
         parent::renderExportControls();
 
         if($this->mode != 'xhtml') return;
         if(!$this->data['pdf']) return;
         if(!$this->resultCount) return;
 
-        $dynamic = $this->searchConfig->getDynamicParameters();
-        $params = $dynamic->getURLParameters();
-        $params['hash'] = $this->renderer->info['struct_table_hash'];
-
         // FIXME apply dynamic filters
-        $link = exportlink($this->id, 'struct_pdf', $params);
+        $urlParameters = array(
+            'do' => 'structodt',
+            'action' => 'renderAll',
+            'template_string' => $this->template
+        );
+
+        foreach($this->data['schemas'] as $key => $schema) {
+            $urlParameters['schema[' . $key . '][0]'] = $schema[0];
+            $urlParameters['schema[' . $key . '][1]'] = $schema[1];
+        }
+
+        $href = wl($ID, $urlParameters);
 
         $style='';
         if (!empty($this->data['csv'])) {
             $style='style="margin-left: 10em;"';
         }
 
-        $this->renderer->doc .= '<a href="' . $link . '" class="export mediafile mf_pdf" ' . $style . '>'.$this->helper_structodt->getLang('btn_downloadAll').'</a>';
+        $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_pdf" ' . $style . '>'.$this->helper_structodt->getLang('btn_downloadAll').'</a>';
     }
 }
