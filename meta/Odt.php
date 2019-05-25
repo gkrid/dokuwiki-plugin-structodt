@@ -201,6 +201,12 @@ class Odt extends AggregationTable {
             $urlParameters['schema[' . $key . '][1]'] = $schema[1];
         }
 
+        foreach($this->data['filter'] as $i => $filter) {
+            foreach ($filter as $j => $value) {
+                $urlParameters["filter[$i][$j]"] = $value;
+            }
+        }
+
         $href = wl($ID, $urlParameters);
 
         $style='';

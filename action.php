@@ -139,11 +139,10 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
 
         $template_string = $INPUT->str('template_string');
         $schemas = $INPUT->arr('schema');
-
-        // FIXME apply dynamic filters
+        $filter = $INPUT->arr('filter');
 
         /** @var Schema $first_schema */
-        $rows = $this->getRows($schemas, $first_schema);
+        $rows = $this->getRows($schemas, $first_schema, $filter);
         $files = [];
         /** @var Value $row */
         foreach ($rows as $pid => $row) {
@@ -397,9 +396,16 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      * @param Schema $first_schema
      * @return Value[][]
      */
-    protected function getRows($schemas, &$first_schema)
+    protected function getRows($schemas, &$first_schema, $filters=array())
     {
         $search = $this->getSearch($schemas, $first_schema);
+        foreach ($filters as $filter) {
+            $colname = $filter[0];
+            $value = $filter[2];
+            $comp = $filter[1];
+            $op = $filter[3];
+            $search->addFilter($colname, $value, $comp, $op);
+        }
         $result = $search->execute();
         $pids = $search->getPids();
         return array_combine($pids, $result);
