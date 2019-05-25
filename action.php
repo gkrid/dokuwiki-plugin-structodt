@@ -7,6 +7,7 @@
  */
 
 use dokuwiki\plugin\struct\meta\AccessTable;
+use dokuwiki\plugin\struct\meta\Schema;
 use dokuwiki\plugin\struct\meta\Search;
 use dokuwiki\plugin\struct\meta\StructException;
 use dokuwiki\plugin\struct\meta\Value;
@@ -122,7 +123,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         }
 
         $method = 'render' . strtoupper($ext);
-        $tmp_file = $this->$method($template, $schemas, $pid);
+        $tmp_file = $this->$method($template, $row);
         if (!$tmp_file) return;
 
         $this->sendFile($tmp_file, noNS($pid), $ext);
@@ -140,7 +141,9 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         $schemas = $INPUT->arr('schema');
 
         // FIXME apply dynamic filters
-        $rows = $this->getRows($schemas);
+
+        /** @var Schema $first_schema */
+        $rows = $this->getRows($schemas, $first_schema);
         $files = [];
         /** @var Value $row */
         foreach ($rows as $pid => $row) {
@@ -167,7 +170,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
             return;
         }
 
-        $this->sendFile($tmp_file, noNS($pid), 'pdf');
+        $this->sendFile($tmp_file, $first_schema->getTranslatedLabel(), 'pdf');
         unlink($tmp_file);
         exit();
     }
@@ -363,35 +366,40 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
     }
 
     /**
-     * Get rows data, optionally filtered by pid
-     *
-     * @param string|array $schemas
-     * @param string $pid
-     * @return Value[][]
+     * @param $schemas
+     * @param Schema $first_schema
+     * @return Search
      */
-    protected function getRows($schemas, $pid=null)
-    {
+    protected function getSearch($schemas, &$first_schema) {
         $search = new Search();
         if (!empty($schemas)) foreach ($schemas as $schema) {
             $search->addSchema($schema[0], $schema[1]);
         }
         $search->addColumn('*');
         $first_schema = $search->getSchemas()[0];
+
         if ($first_schema->isLookup()) {
-            if ($pid) {
-                $search->addFilter('%rowid%', $pid, '=');
-            }
             $search->addColumn('%rowid%');
         } else {
-            if ($pid) {
-                $search->addFilter('%pageid%', $pid, '=');
-            }
             $search->addColumn('%pageid%');
             $search->addColumn('%title%');
             $search->addColumn('%lastupdate%');
             $search->addColumn('%lasteditor%');
         }
 
+        return $search;
+    }
+
+    /**
+     * Get rows data, optionally filtered by pid
+     *
+     * @param string|array $schemas
+     * @param Schema $first_schema
+     * @return Value[][]
+     */
+    protected function getRows($schemas, &$first_schema)
+    {
+        $search = $this->getSearch($schemas, $first_schema);
         $result = $search->execute();
         $pids = $search->getPids();
         return array_combine($pids, $result);
@@ -405,7 +413,14 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      * @return Value[]|null
      */
     protected function getRow($schemas, $pid) {
-        $result = $this->getRows($schemas, $pid);
+        /** @var Schema $first_schema */
+        $search = $this->getSearch($schemas, $first_schema);
+        if ($first_schema->isLookup()) {
+            $search->addFilter('%rowid%', $pid, '=');
+        } else {
+            $search->addFilter('%pageid%', $pid, '=');
+        }
+        $result = $search->execute();
         if (count($result) != 1) {
             return null;
         }
