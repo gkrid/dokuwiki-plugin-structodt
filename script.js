@@ -23,7 +23,7 @@ jQuery(function() {
                 const $me = jQuery(this);
 
                 // already added here?
-                if ($me.find('th.action, td.action').length) {
+                if ($me.find('th.actionodt, td.actionodt').length) {
                     return;
                 }
 
@@ -34,12 +34,12 @@ jQuery(function() {
 
                 // empty header cells
                 if (!rid) {
-                    $me.append('<th class="action">' + LANG.plugins.struct.actions + '</th>');
+                    $me.append('<th class="actionodt">' + LANG.plugins.struct.actions + '</th>');
                     return;
                 }
 
                 // delete buttons for rows
-                const $td = jQuery('<td class="action"></td>');
+                const $td = jQuery('<td class="actionodt"></td>');
 
                 const icon = DOKU_BASE + 'lib/images/fileicons/' + filetype + '.png'
                 const url = new URL(window.location.href);
