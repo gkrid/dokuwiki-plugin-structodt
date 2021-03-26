@@ -249,18 +249,6 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
         } catch (StructException $ignore) {
             return null;
         }
-//        /** @var Schema $first_schema */
-//        $search = $this->getSearch($schema, $first_schema);
-//        if ($first_schema->isLookup()) {
-//            $search->addFilter('%rowid%', $pid, '=');
-//        } else {
-//            $search->addFilter('%pageid%', $pid, '=');
-//        }
-//        $result = $search->execute();
-//        if (count($result) != 1) {
-//            return null;
-//        }
-//        return current($result);
     }
 
     /**

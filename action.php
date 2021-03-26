@@ -183,30 +183,6 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         unlink($tmp_file);
         exit();
     }
-
-    /**
-     *
-     */
-//    public function action_delete() {
-//        global $INPUT, $ID;
-//        $tablename = $INPUT->str('schema');
-//        $pid = $INPUT->int('pid');
-//        if (!$pid) {
-//            throw new StructException('No pid given');
-//        }
-//        if (!$tablename) {
-//            throw new StructException('No schema given');
-//        }
-//        action_plugin_struct_inline::checkCSRF();
-//
-//        $schemadata = AccessTable::byTableName($tablename, $pid);
-//        if (!$schemadata->getSchema()->isEditable()) {
-//            throw new StructException('lookup delete error: no permission for schema');
-//        }
-//        $schemadata->clearData();
-//
-//        header("Location: " . wl($ID));
-//    }
 }
 
 // vim:ts=4:sw=4:et:
