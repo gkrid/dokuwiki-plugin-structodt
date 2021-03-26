@@ -1,7 +1,7 @@
 base   structodt
 author Szymon Olewniczak
 email  it@rid.pl
-date   2019-05-25
+date   2021-03-26
 name   structodt plugin
 desc   Generate ODT documents, using struct data
 url    https://www.dokuwiki.org/plugin:structodt

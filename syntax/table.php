@@ -7,14 +7,14 @@
  */
 
 // must be run within Dokuwiki
-use dokuwiki\plugin\structodt\meta\Odt;
+use dokuwiki\plugin\structodt\meta\AggregationTableOdt;
 
 if (!defined('DOKU_INC')) die();
 
-class syntax_plugin_structodt extends syntax_plugin_struct_table {
+class syntax_plugin_structodt_table extends syntax_plugin_struct_table {
 
     /** @var string which class to use for output */
-    protected $tableclass = Odt::class;
+    protected $tableclass = AggregationTableOdt::class;
 
     /**
      * Connect lookup pattern to lexer.
@@ -22,7 +22,8 @@ class syntax_plugin_structodt extends syntax_plugin_struct_table {
      * @param string $mode Parser mode
      */
     public function connectTo($mode) {
-        $this->Lexer->addSpecialPattern('----+ *struct odt *-+\n.*?\n----+', $mode, 'plugin_structodt');
+        $this->Lexer->addSpecialPattern('----+ *struct odt *-+\n.*?\n----+', $mode, 'plugin_structodt_table');
+        $this->Lexer->addSpecialPattern('----+ *struct odt table *-+\n.*?\n----+', $mode, 'plugin_structodt_table');
     }
 }
 
