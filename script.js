@@ -41,7 +41,7 @@ jQuery(function() {
                 // delete buttons for rows
                 const $td = jQuery('<td class="actionodt"></td>');
 
-                const icon = DOKU_BASE + 'lib/images/fileicons/' + filetype + '.png'
+                const icon = DOKU_BASE + 'lib/images/fileicons/' + filetype + '.png';
                 const url = new URL(window.location.href);
                 url.searchParams.append('do', 'structodt');
                 url.searchParams.append('action', 'render');
@@ -52,7 +52,7 @@ jQuery(function() {
                 url.searchParams.append('template', template);
                 url.searchParams.append('filetype', filetype);
                 title = LANG['plugins']['structodt']['btn_download'];
-                const $btn = jQuery('<a href="'+url.href+'" title="' + title + '"><img src="'+icon+'" alt="'+filetype+'" class="icon"></a>')
+                const $btn = jQuery('<a href="'+url.href+'" title="' + title + '"><img src="'+icon+'" alt="'+filetype+'" class="icon"></a>');
 
                 $td.append($btn);
                 $me.append($td);
