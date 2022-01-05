@@ -7,11 +7,13 @@
  */
 
 // must be run within Dokuwiki
+use dokuwiki\Parsing\Parser;
 use dokuwiki\plugin\struct\meta\AccessTable;
 use dokuwiki\plugin\struct\meta\Schema;
 use dokuwiki\plugin\struct\meta\Search;
 use dokuwiki\plugin\struct\meta\StructException;
 use dokuwiki\plugin\struct\meta\Value;
+use dokuwiki\plugin\struct\types\Wiki;
 use splitbrain\PHPArchive\FileInfo;
 use splitbrain\PHPArchive\Zip;
 
@@ -274,9 +276,45 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
                         return $dvalue[$index];
                     }
                     return 'Array: index out of bound';
-                }
-                if (is_array($dvalue)) {
+                } elseif (is_array($dvalue)) {
                     return implode(',', $dvalue);
+                } elseif ($value->getColumn()->getType() instanceof Wiki) {
+                    //import parser classes and mode definitions
+                    require_once DOKU_INC . 'inc/parser/parser.php';
+
+                    // Create the parser and handler
+                    $Parser = new Parser(new Doku_Handler());
+
+                    // add default modes
+                    $std_modes = array('linebreak', 'eol');
+
+                    foreach($std_modes as $m){
+                        $class = 'dokuwiki\\Parsing\\ParserMode\\'.ucfirst($m);
+                        $obj   = new $class();
+                        $modes[] = array(
+                            'sort' => $obj->getSort(),
+                            'mode' => $m,
+                            'obj'  => $obj
+                        );
+                    }
+
+                    //add modes to parser
+                    foreach($modes as $mode){
+                        $Parser->addMode($mode['mode'],$mode['obj']);
+                    }
+                    // Do the parsing
+                    $instructions = $Parser->parse($dvalue);
+                    $Renderer = p_get_renderer('structodt');
+
+                    // Loop through the instructions
+                    foreach ($instructions as $instruction) {
+                        // Execute the callback against the Renderer
+                        if(method_exists($Renderer, $instruction[0])){
+                            call_user_func_array(array(&$Renderer, $instruction[0]), $instruction[1] ? $instruction[1] : array());
+                        }
+                    }
+
+                    return $Renderer->doc;
                 }
                 return $dvalue;
             }, $content);
