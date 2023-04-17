@@ -49,7 +49,7 @@ jQuery(function() {
                 url.searchParams.append('pid', pid);
                 url.searchParams.append('rev', rev);
                 url.searchParams.append('rid', rid);
-                url.searchParams.append('template', template);
+                url.searchParams.append('template', JSON.stringify(template));
                 url.searchParams.append('filetype', filetype);
                 title = LANG['plugins']['structodt']['btn_download'];
                 const $btn = jQuery('<a href="'+url.href+'" title="' + title + '"><img src="'+icon+'" alt="'+filetype+'" class="icon"></a>');

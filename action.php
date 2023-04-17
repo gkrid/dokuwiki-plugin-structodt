@@ -34,12 +34,10 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      */
 
     public function handle_strut_configparser(Doku_Event &$event, $param) {
-        /* delete will be removed in future relases */
-        $keys = array('template', 'delete', 'pdf');
-        $data = $event->data;
+        $keys = ['template', 'pdf', 'hideform'];
 
-        $key = $data['key'];
-        $val = trim($data['val']);
+        $key = $event->data['key'];
+        $val = trim($event->data['val']);
 
         if (!in_array($key, $keys)) return;
 
@@ -48,28 +46,29 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
 
         switch ($key) {
             case 'template':
-                $data['config'][$key] = $val;
+                $event->data['config'][$key] = array_map('trim', explode(',', $val));
                 break;
             case 'pdf':
-                if (!$val) {
-                    $data['config'][$key] = false;
-                } else {
+                $event->data['config'][$key] = (bool) $val;
+                if ($event->data['config']) {
                     //check for "unoconv"
                     $val = shell_exec('command -v unoconv');
                     if (empty($val)) {
                         msg('Cannot locate "unoconv". Falling back to ODT mode.', 0);
-                        $data['config'][$key] = false;
+                        $event->data['config'][$key] = false;
                         break;
                     }
                     //check for "ghostscript"
                     $val = shell_exec('command -v ghostscript');
                     if (empty($val)) {
                         msg('Cannot locate "ghostscript". Falling back to ODT mode.', 0);
-                        $data['config'][$key] = false;
+                        $event->data['config'][$key] = false;
                         break;
                     }
-                    $data['config'][$key] = true;
                 }
+                break;
+            case 'hideform':
+                $event->data['config'][$key] = (bool) $val;
                 break;
         }
     }
@@ -91,7 +90,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
 
         $method = 'action_' . $INPUT->str('action');
         if (method_exists($this, $method)) {
-            call_user_func(array($this, $method));
+            call_user_func([$this, $method]);
         }
     }
 
@@ -106,29 +105,39 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
          */
         $helper = plugin_load('helper', 'structodt');
 
-        $template = $INPUT->str('template');
+        $templates = json_decode($INPUT->str('template'));
         $ext = $INPUT->str('filetype');
+        if (count($templates) > 1 && $ext != 'pdf') {
+            msg("Multiple templates are available only for pdf format.", -1);
+            return false;
+        }
+
         $schema = $INPUT->str('schema');
         $pid = $INPUT->str('pid');
         $rev = $INPUT->str('rev');
         $rid = $INPUT->str('rid');
 
         $row = $helper->getRow($schema, $pid, $rev, $rid);
-        $template = $helper->rowTemplate($row, $template);
-
         if (is_null($row)) {
             msg("Row with id: $pid doesn't exists", -1);
             return false;
         }
 
-        $method = 'render' . strtoupper($ext);
-        $tmp_file = $helper->$method($template, $row);
-        if (!$tmp_file) return;
+        $templates = array_map(function ($template) use ($helper, $row) {
+            return $helper->rowTemplate($row, $template);
+        }, $templates);
 
-        if ($pid) {
-            $filename = noNS($pid);
-        } else {
-            $filename = $rid;
+        if (count($templates) == 1) {
+            $template = $templates[0];
+            $method = 'render' . strtoupper($ext);
+            $tmp_file = $helper->$method($template, $row);
+            if (!$tmp_file) return;
+
+            if ($pid) {
+                $filename = noNS($pid);
+            } else {
+                $filename = $rid;
+            }
         }
 
         $helper->sendFile($tmp_file, $filename, $ext);
@@ -155,7 +164,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         $rows = $helper->getRows($schemas, $first_schema, $filter);
         $files = [];
         /** @var Value $row */
-        foreach ($rows as $pid => $row) {
+        foreach ($rows as $row) {
             $template = $helper->rowTemplate($row, $template_string);
             $tmp_file = $helper->renderPDF($template, $row);
             if (!$tmp_file) {

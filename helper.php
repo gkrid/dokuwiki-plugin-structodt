@@ -197,14 +197,11 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
         $search->addColumn('*');
         $first_schema = $search->getSchemas()[0];
 
-        if ($first_schema->isLookup()) {
-            $search->addColumn('%rowid%');
-        } else {
-            $search->addColumn('%pageid%');
-            $search->addColumn('%title%');
-            $search->addColumn('%lastupdate%');
-            $search->addColumn('%lasteditor%');
-        }
+        $search->addColumn('%rowid%');
+        $search->addColumn('%pageid%');
+        $search->addColumn('%title%');
+        $search->addColumn('%lastupdate%');
+        $search->addColumn('%lasteditor%');
 
         return $search;
     }
@@ -227,8 +224,7 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
             $search->addFilter($colname, $value, $comp, $op);
         }
         $result = $search->execute();
-        $pids = $search->getPids();
-        return array_combine($pids, $result);
+        return $result;
     }
 
     /**
@@ -334,9 +330,11 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
         //do media file substitutions
         $media = preg_replace_callback('/\$(.*?)\$/', function ($matches) use ($row) {
             $possibleValueTypes = array('getValue', 'getCompareValue', 'getDisplayValue', 'getRawValue');
-            list($label, $valueType) = explode('.', $matches[1], 2);
-            if (!$valueType || !in_array($valueType, $possibleValueTypes)) {
-                $valueType = 'getDisplayValue';
+            $explode = explode('.', $matches[1], 2);
+            $label = $explode[0];
+            $valueType = 'getDisplayValue';
+            if (isset($explode[1]) && in_array($explode[1], $possibleValueTypes)) {
+                $valueType = $explode[1];
             }
             foreach ($row as $value) {
                 $column = $value->getColumn();
