@@ -7,6 +7,7 @@
  */
 
 // must be run within Dokuwiki
+use dokuwiki\File\MediaResolver;
 use dokuwiki\Parsing\Parser;
 use dokuwiki\plugin\struct\meta\AccessTable;
 use dokuwiki\plugin\struct\meta\Schema;
@@ -45,13 +46,13 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
      * @return string|bool
      * @throws \splitbrain\PHPArchive\ArchiveIOException
      * @throws \splitbrain\PHPArchive\FileInfoException
+     * @throws Exception
      */
     public function renderODT($template, $row) {
         $template_file = mediaFN($template);
         $tmp_dir = $this->tmpFileName() . '/';
         if (!mkdir($tmp_dir, 0777, true)) {
-            msg("could not create tmp dir - bad permissions?", -1);
-            return false;
+            throw new \Exception("could not create tmp dir - bad permissions?", -1);
         }
 
         $template_zip = new Zip();
@@ -64,9 +65,8 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
             $content_file = $tmp_dir . $file;
             $content = file_get_contents($content_file);
             if ($content === false) {
-                msg("Cannot open: $content_file", -1);
                 $this->rmdir_recursive($tmp_dir);
-                return false;
+                throw new \Exception("Cannot open: $content_file");
             }
 
             $content = $this->replace($content, $row);
@@ -101,23 +101,37 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
      * @return string|bool
      * @throws \splitbrain\PHPArchive\ArchiveIOException
      * @throws \splitbrain\PHPArchive\FileInfoException
+     * @throws Exception
      */
     public function renderPDF($template, $row) {
         $tmp_file = $this->renderODT($template, $row);
-        if (!$tmp_file) return false;
 
         $wd = dirname($tmp_file);
         $bn = basename($tmp_file);
         $cmd = "cd $wd && HOME=$wd unoconv -f pdf $bn 2>&1";
-        exec($cmd, $output, $return_var);
-        unlink($tmp_file);
-        if ($return_var != 0) {
-            msg("PDF conversion error($return_var): " . implode('<br>', $output), -1);
-            return false;
+        exec($cmd, $output, $result_code);
+        @unlink($tmp_file); // remove odt file
+        if ($result_code != 0) {
+            throw new \Exception("PDF conversion error($result_code): " . implode('<br>', $output), -1);
         }
         //change extension to pdf
         $tmp_file = substr($tmp_file, 0, -3) . 'pdf';
 
+        return $tmp_file;
+    }
+
+    public function concatenate($rendered_pages) {
+        $tmp_file = $this->tmpFileName('pdf');
+        $cmd = "gs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile=$tmp_file ";
+        // Add each pdf file to the end of the command
+        foreach($rendered_pages as $file) {
+            $cmd .= $file.' ';
+        }
+        $cmd .= '2>&1';
+        exec($cmd, $output, $result_code);
+        if ($result_code != 0) {
+            throw new \Exception("PDF concatenation error($result_code): " . implode('<br>', $output), -1);
+        }
         return $tmp_file;
     }
 
@@ -176,9 +190,9 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
             RecursiveIteratorIterator::CHILD_FIRST);
         foreach($iterator as $file) {
             if ($file->isDir()){
-                rmdir($file->getRealPath());
+                @rmdir($file->getRealPath());
             } else {
-                unlink($file->getRealPath());
+                @unlink($file->getRealPath());
             }
         }
         rmdir($path);
@@ -235,18 +249,19 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
      * @return Value[]|null
      */
     public function getRow($table, $pid, $rev, $rid) {
-        try {
-            if (AccessTable::isTypePage($pid, $rev)) {
-                $schemadata = AccessTable::getPageAccess($table, $pid);
-            } elseif (AccessTable::isTypeSerial($pid, $rev)) {
-                $schemadata = AccessTable::getSerialAccess($table, $pid, $rid);
-            } else {
-                $schemadata = AccessTable::getGlobalAccess($table, $rid);
-            }
-            return $schemadata->getData();
-        } catch (StructException $ignore) {
-            return null;
+        // second value of schema array is alias. ignore it for now
+        $schema = [$table, ''];
+        $search = $this->getSearch([$schema], $ignore);
+        if (AccessTable::isTypePage($pid, $rev)) {
+            $search->addFilter('%pageid%', $pid, '=');
+        } elseif (AccessTable::isTypeSerial($pid, $rev)) {
+            $search->addFilter('%pageid%', $pid, '=');
+            $search->addFilter('%rowid%', $rid, '=');
+        } else {
+            $search->addFilter('%rowid%', $rid, '=');
         }
+        $result = $search->execute();
+        return $result[0];
     }
 
     /**
@@ -323,11 +338,12 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
      * @param $row
      * @param string $template
      * @return string
+     * @throws Exception
      */
     public function rowTemplate($row, $template) {
         global $ID;
 
-        //do media file substitutions
+         //do media file substitutions
         $media = preg_replace_callback('/\$(.*?)\$/', function ($matches) use ($row) {
             $possibleValueTypes = array('getValue', 'getCompareValue', 'getDisplayValue', 'getRawValue');
             $explode = explode('.', $matches[1], 2);
@@ -345,10 +361,9 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
             return '';
         }, $template);
 
-        resolve_mediaid(getNS($ID), $media, $exists);
-        if (!$exists) {
-            msg("<strong>structodt</strong>: template file($media) doesn't exist", -1);
-        }
+        $resolver = new MediaResolver($ID);
+        $media = $resolver->resolveId($media);
+
         return $media;
     }
 }

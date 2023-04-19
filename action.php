@@ -99,6 +99,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      */
     public function action_render() {
         global $INPUT;
+        $extensions = ['pdf', 'odt'];
 
         /**
          * @var \helper_plugin_structodt
@@ -107,6 +108,10 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
 
         $templates = json_decode($INPUT->str('template'));
         $ext = $INPUT->str('filetype');
+        if (!in_array($ext, $extensions)) {
+            msg("Unknown file extension: $ext. Avaliable extensions: " . implode(', ', $extensions), -1);
+            return false;
+        }
         if (count($templates) > 1 && $ext != 'pdf') {
             msg("Multiple templates are available only for pdf format.", -1);
             return false;
@@ -117,31 +122,44 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         $rev = $INPUT->str('rev');
         $rid = $INPUT->str('rid');
 
-        $row = $helper->getRow($schema, $pid, $rev, $rid);
-        if (is_null($row)) {
-            msg("Row with id: $pid doesn't exists", -1);
+        try {
+            $row = $helper->getRow($schema, $pid, $rev, $rid);
+            if (is_null($row)) {
+                msg("Row with id: $pid doesn't exists", -1);
+                return false;
+            }
+        } catch (\Exception $e) {
+            msg($e->getMessage(), -1);
             return false;
         }
 
-        $templates = array_map(function ($template) use ($helper, $row) {
-            return $helper->rowTemplate($row, $template);
-        }, $templates);
-
-        if (count($templates) == 1) {
-            $template = $templates[0];
-            $method = 'render' . strtoupper($ext);
-            $tmp_file = $helper->$method($template, $row);
-            if (!$tmp_file) return;
-
-            if ($pid) {
-                $filename = noNS($pid);
-            } else {
-                $filename = $rid;
+        $rendered_pages = [];
+        try {
+            foreach ($templates as $template) {
+                $template = $helper->rowTemplate($row, $template);
+                if ($template != '' && media_exists($template, '', false)) {
+                    $method = 'render' . strtoupper($ext);
+                    $rendered_pages[] = $helper->$method($template, $row);
+                }
             }
+            if (count($rendered_pages) > 1) {
+                $tmp_file = $helper->concatenate($rendered_pages);
+                foreach ($rendered_pages as $page) {
+                    @unlink($page);
+                }
+            } else {
+                $tmp_file = $rendered_pages[0];
+            }
+        } catch (\Exception $e) {
+            foreach ($rendered_pages as $page) {
+                @unlink($page);
+            }
+            msg($e->getMessage(), -1);
         }
 
+        $filename = empty($pid) ? $rid : noNS($pid);
         $helper->sendFile($tmp_file, $filename, $ext);
-        unlink($tmp_file);
+        @unlink($tmp_file);
         exit();
     }
 
@@ -156,7 +174,8 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
          */
         $helper = plugin_load('helper', 'structodt');
 
-        $template_string = $INPUT->str('template_string');
+        $template_string = htmlspecialchars_decode($INPUT->str('template_string'));
+        $templates = json_decode($template_string);
         $schemas = $INPUT->arr('schema');
         $filter = $INPUT->arr('filter');
 
@@ -165,31 +184,44 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         $files = [];
         /** @var Value $row */
         foreach ($rows as $row) {
-            $template = $helper->rowTemplate($row, $template_string);
-            $tmp_file = $helper->renderPDF($template, $row);
-            if (!$tmp_file) {
-                array_map('unlink', $files);
-                msg('Cannot render bulk pdf', -1);
-                return;
+            try {
+                $rendered_pages = [];
+                foreach ($templates as $template_string) {
+                    $template = $helper->rowTemplate($row, $template_string);
+                    // we must check for empty string because media_exists return true on $media_id: this is dokuwiki bug
+                    if ($template != '' && media_exists($template, '', false)) {
+                        $rendered_pages[] = $helper->renderPDF($template, $row);
+                    }
+                }
+                $tmp_file = $helper->concatenate($rendered_pages);
+            } catch (\Exception $e) {
+                foreach ($files as $file) { // remove partial results
+                    @unlink($file);
+                }
+                msg($e->getMessage(), -1);
+                return false;
+            } finally {  // remove rendered pages for single row
+                foreach ($rendered_pages as $page) {
+                    @unlink($page);
+                }
             }
             $files[] = $tmp_file;
         }
 
         //join files
-        $tmp_file = $helper->tmpFileName('pdf');
-        $cmd = "ghostscript -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile=$tmp_file ";
-        $cmd .= implode(' ', $files);
-        $cmd .= ' 2>&1';
-        exec($cmd, $output, $return_var);
-        array_map('unlink', $files);
-        if ($return_var != 0) {
-            msg("PDF merge error($return_var): " . implode('<br>', $output), -1);
-            @unlink($tmp_file);
-            return;
+        try {
+            $tmp_file = $helper->concatenate($files);
+        } catch (\Exception $e) {
+            msg($e->getMessage(), -1);
+            return false;
+        } finally {
+            foreach ($files as $file) {
+                @unlink($file);
+            }
         }
-
-        $helper->sendFile($tmp_file, $first_schema->getTranslatedLabel(), 'pdf');
-        unlink($tmp_file);
+        $filename = $first_schema->getTranslatedLabel();
+        $helper->sendFile($tmp_file, $filename, 'pdf');
+        @unlink($tmp_file);
         exit();
     }
 }
