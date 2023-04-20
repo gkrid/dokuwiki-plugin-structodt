@@ -94,6 +94,48 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         }
     }
 
+    protected function render_single($row, $templates, $ext='pdf') {
+        /**
+         * @var \helper_plugin_structodt
+         */
+        $helper = plugin_load('helper', 'structodt');
+
+        $rendered_pages = [];
+        try {
+            foreach ($templates as $template) {
+                $template = $helper->rowTemplate($row, $template);
+                if ($template != '' && media_exists($template, '', false)) {
+                    $mimetype = mimetype($template);
+                    // pdf templates are available only in pdf output format
+                    if ($mimetype[0] == 'pdf' && $ext == 'pdf') {
+                        $rendered_page = $helper->tmpFileName('pdf');
+                        copy(mediaFN($template), $rendered_page);
+                        $rendered_pages[] = $rendered_page;
+                    } elseif ($mimetype[0] == 'odt') {
+                        $method = 'render' . strtoupper($ext);
+                        $rendered_pages[] = $helper->$method($template, $row);
+                    } else {
+                        throw new \Exception('unknown template file format');
+                    }
+                }
+            }
+            if (count($rendered_pages) > 1) {
+                $tmp_file = $helper->concatenate($rendered_pages);
+                foreach ($rendered_pages as $page) {
+                    @unlink($page);
+                }
+            } else {
+                $tmp_file = $rendered_pages[0];
+            }
+        } catch (\Exception $e) {
+            foreach ($rendered_pages as $page) {
+                @unlink($page);
+            }
+            msg($e->getMessage(), -1);
+        }
+        return $tmp_file;
+    }
+
     /**
      * Render file
      */
@@ -125,38 +167,14 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         try {
             $row = $helper->getRow($schema, $pid, $rev, $rid);
             if (is_null($row)) {
-                msg("Row with id: $pid doesn't exists", -1);
-                return false;
+                throw new \Exception("Row with id: $pid doesn't exists");
             }
         } catch (\Exception $e) {
             msg($e->getMessage(), -1);
             return false;
         }
 
-        $rendered_pages = [];
-        try {
-            foreach ($templates as $template) {
-                $template = $helper->rowTemplate($row, $template);
-                if ($template != '' && media_exists($template, '', false)) {
-                    $method = 'render' . strtoupper($ext);
-                    $rendered_pages[] = $helper->$method($template, $row);
-                }
-            }
-            if (count($rendered_pages) > 1) {
-                $tmp_file = $helper->concatenate($rendered_pages);
-                foreach ($rendered_pages as $page) {
-                    @unlink($page);
-                }
-            } else {
-                $tmp_file = $rendered_pages[0];
-            }
-        } catch (\Exception $e) {
-            foreach ($rendered_pages as $page) {
-                @unlink($page);
-            }
-            msg($e->getMessage(), -1);
-        }
-
+        $tmp_file = $this->render_single($row, $templates, $ext);
         $filename = empty($pid) ? $rid : noNS($pid);
         $helper->sendFile($tmp_file, $filename, $ext);
         @unlink($tmp_file);
@@ -184,27 +202,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         $files = [];
         /** @var Value $row */
         foreach ($rows as $row) {
-            try {
-                $rendered_pages = [];
-                foreach ($templates as $template_string) {
-                    $template = $helper->rowTemplate($row, $template_string);
-                    // we must check for empty string because media_exists return true on $media_id: this is dokuwiki bug
-                    if ($template != '' && media_exists($template, '', false)) {
-                        $rendered_pages[] = $helper->renderPDF($template, $row);
-                    }
-                }
-                $tmp_file = $helper->concatenate($rendered_pages);
-            } catch (\Exception $e) {
-                foreach ($files as $file) { // remove partial results
-                    @unlink($file);
-                }
-                msg($e->getMessage(), -1);
-                return false;
-            } finally {  // remove rendered pages for single row
-                foreach ($rendered_pages as $page) {
-                    @unlink($page);
-                }
-            }
+            $tmp_file = $this->render_single($row, $templates);
             $files[] = $tmp_file;
         }
 
