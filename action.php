@@ -6,8 +6,10 @@
  * @author  Szymon Olewniczak <it@rid.pl>
  */
 
+use dokuwiki\File\MediaResolver;
 use dokuwiki\plugin\struct\meta\Schema;
 use dokuwiki\plugin\struct\meta\Value;
+use splitbrain\PHPArchive\Zip;
 
 // must be run within Dokuwiki
 if(!defined('DOKU_INC')) die();
@@ -20,7 +22,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      * @return void
      */
     public function register(Doku_Event_Handler $controller) {
-        $controller->register_hook('PLUGIN_STRUCT_CONFIGPARSER_UNKNOWNKEY', 'BEFORE', $this, 'handle_strut_configparser');
+        $controller->register_hook('PLUGIN_STRUCT_CONFIGPARSER_UNKNOWNKEY', 'BEFORE', $this, 'handle_struct_configparser');
         $controller->register_hook('ACTION_ACT_PREPROCESS', 'BEFORE', $this, 'handle_action_act_prerpocess');
     }
 
@@ -33,8 +35,8 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
      * @return void
      */
 
-    public function handle_strut_configparser(Doku_Event &$event, $param) {
-        $keys = ['template', 'pdf', 'hideform'];
+    public function handle_struct_configparser(Doku_Event &$event, $param) {
+        $keys = ['template', 'pdf', 'hideform', 'filename'];
 
         $key = $event->data['key'];
         $val = trim($event->data['val']);
@@ -70,6 +72,9 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
             case 'hideform':
                 $event->data['config'][$key] = (bool) $val;
                 break;
+            case 'filename':
+                $event->data['config'][$key] = trim($val);
+                break;
         }
     }
 
@@ -95,6 +100,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
     }
 
     protected function render_single($row, $templates, $ext='pdf') {
+        global $ID;
         /**
          * @var \helper_plugin_structodt
          */
@@ -104,6 +110,8 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         try {
             foreach ($templates as $template) {
                 $template = $helper->rowTemplate($row, $template);
+                $resolver = new MediaResolver($ID);
+                $template = $resolver->resolveId($template);
                 if ($template != '' && media_exists($template, '', false)) {
                     $mimetype = mimetype($template);
                     // pdf templates are available only in pdf output format
@@ -163,26 +171,30 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         $pid = $INPUT->str('pid');
         $rev = $INPUT->str('rev');
         $rid = $INPUT->str('rid');
+        $filename = $INPUT->str('filename');
 
         try {
             $row = $helper->getRow($schema, $pid, $rev, $rid);
             if (is_null($row)) {
                 throw new \Exception("Row with id: $pid doesn't exists");
             }
+            $tmp_file = $this->render_single($row, $templates, $ext);
+            if (empty($filename)) {
+                $filename = empty($pid) ? $rid : noNS($pid);
+            } else {
+                $filename = $helper->rowTemplate($row, $filename);
+            }
         } catch (\Exception $e) {
             msg($e->getMessage(), -1);
             return false;
         }
-
-        $tmp_file = $this->render_single($row, $templates, $ext);
-        $filename = empty($pid) ? $rid : noNS($pid);
         $helper->sendFile($tmp_file, $filename, $ext);
         @unlink($tmp_file);
         exit();
     }
 
     /**
-     * Render all files as single PDF
+     * Render all files as single PDF or ZIP archive
      */
     public function action_renderAll() {
         global $INPUT;
@@ -196,19 +208,33 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         $templates = json_decode($template_string);
         $schemas = $INPUT->arr('schema');
         $filter = $INPUT->arr('filter');
+        $format = $INPUT->str('format', 'zip');
+        $filename = $INPUT->str('filename');
 
         /** @var Schema $first_schema */
         $rows = $helper->getRows($schemas, $first_schema, $filter);
         $files = [];
         /** @var Value $row */
+        $i = 1;
         foreach ($rows as $row) {
             $tmp_file = $this->render_single($row, $templates);
-            $files[] = $tmp_file;
+            $tmp_filename = empty($filename) ? $i++ : $helper->rowTemplate($row, $filename);
+            $files[$tmp_filename] = $tmp_file;
         }
 
         //join files
         try {
-            $tmp_file = $helper->concatenate($files);
+            if ($format == 'pdf') {
+                $tmp_file = $helper->concatenate($files);
+            } elseif ($format == 'zip') {
+                $tmp_file = $helper->tmpFileName('zip');
+                $archive = new Zip();
+                $archive->create($tmp_file);
+                foreach ($files as $filename => $file) {
+                    $archive->addFile($file, $filename . '.pdf');
+                }
+                $archive->close();
+            }
         } catch (\Exception $e) {
             msg($e->getMessage(), -1);
             return false;
@@ -218,7 +244,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
             }
         }
         $filename = $first_schema->getTranslatedLabel();
-        $helper->sendFile($tmp_file, $filename, 'pdf');
+        $helper->sendFile($tmp_file, $filename, $format);
         @unlink($tmp_file);
         exit();
     }

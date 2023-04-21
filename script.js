@@ -15,6 +15,8 @@ jQuery(function() {
         const filetype = $table.parents('.structaggregation').data('filetype');
         if (!filetype) return;
 
+        const filename = $table.parents('.structaggregation').data('filename'); // filename can be empty
+
         /**
          * Adds odt export row buttons to each row
          */
@@ -51,6 +53,7 @@ jQuery(function() {
                 url.searchParams.append('rid', rid);
                 url.searchParams.append('template', JSON.stringify(template));
                 url.searchParams.append('filetype', filetype);
+                url.searchParams.append('filename', filename);
                 title = LANG['plugins']['structodt']['btn_download'];
                 const $btn = jQuery('<a href="'+url.href+'" title="' + title + '"><img src="'+icon+'" alt="'+filetype+'" class="icon"></a>');
 

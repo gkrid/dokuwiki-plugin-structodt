@@ -341,10 +341,7 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
      * @throws Exception
      */
     public function rowTemplate($row, $template) {
-        global $ID;
-
-         //do media file substitutions
-        $media = preg_replace_callback('/\$(.*?)\$/', function ($matches) use ($row) {
+        return preg_replace_callback('/\$(.*?)\$/', function ($matches) use ($row) {
             $possibleValueTypes = array('getValue', 'getCompareValue', 'getDisplayValue', 'getRawValue');
             $explode = explode('.', $matches[1], 2);
             $label = $explode[0];
@@ -360,10 +357,5 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
             }
             return '';
         }, $template);
-
-        $resolver = new MediaResolver($ID);
-        $media = $resolver->resolveId($media);
-
-        return $media;
     }
 }

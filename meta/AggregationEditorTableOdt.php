@@ -35,8 +35,9 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
         parent::__construct($id, $mode, $renderer, $searchConfig);
         $conf = $searchConfig->getConf();
         $this->template = $conf['template'];
-        $this->pdf = $conf['pdf'];
-        $this->hideform = $conf['hideform'];
+        $this->pdf = $conf['pdf'] ?? false;
+        $this->hideform = $conf['hideform'] ?? false;
+        $this->filename = $conf['filename'] ?? '';
         $this->helper_structodt = plugin_load('helper', 'structodt');
     }
 
@@ -68,10 +69,12 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
             $hideform = 'hideform';
         }
 
+        $filename = hsc($this->filename);
         // wrapping div
         $this->renderer->doc .= "<div class=\"structaggregation structaggregationeditor structodt $hideform\"
                                     data-schema=\"$table\" data-searchconf=\"$config\"
-                                    data-template=\"$template\" data-filetype=\"$filetype\">";
+                                    data-template=\"$template\" data-filetype=\"$filetype\"
+                                    data-filename=\"$filename\"'>";
 
         // unique identifier for this aggregation
         $this->renderer->info['struct_table_hash'] = md5(var_export($this->data, true));
@@ -86,14 +89,14 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
         parent::renderExportControls();
 
         if($this->mode != 'xhtml') return;
-        if(!$this->data['pdf']) return;
         if(!$this->resultCount) return;
 
         // FIXME apply dynamic filters
         $urlParameters = array(
             'do' => 'structodt',
             'action' => 'renderAll',
-            'template_string' => hsc(json_encode($this->template))
+            'template_string' => hsc(json_encode($this->template)),
+            'filename' => $this->filename
         );
 
         foreach($this->data['schemas'] as $key => $schema) {
@@ -107,13 +110,24 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
             }
         }
 
-        $href = wl($ID, $urlParameters);
 
-        $style='';
+
+        $margin=0;
         if (!empty($this->data['csv'])) {
-            $style='style="margin-left: 10em;"';
+            $margin = 10;
         }
 
-        $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_pdf" ' . $style . '>'.$this->helper_structodt->getLang('btn_downloadAll').'</a>';
+        $href = wl($ID, $urlParameters);
+        $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_zip" style="margin-left: ' . $margin . 'em;">' .
+            $this->helper_structodt->getLang('btn_downloadAll') .
+        '</a>';
+
+        if ($this->pdf) {
+            $urlParameters['format'] = 'pdf';
+            $href = wl($ID, $urlParameters);
+            $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_pdf" style="margin-left: ' . $margin + 11 . 'em;">' .
+                $this->helper_structodt->getLang('btn_downloadAll') .
+                '</a>';
+        }
     }
 }
