@@ -290,9 +290,6 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
                 } elseif (is_array($dvalue)) {
                     return implode(',', $dvalue);
                 } elseif ($value->getColumn()->getType() instanceof Wiki) {
-                    //import parser classes and mode definitions
-                    require_once DOKU_INC . 'inc/parser/parser.php';
-
                     // Create the parser and handler
                     $Parser = new Parser(new Doku_Handler());
 
