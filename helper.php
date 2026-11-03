@@ -21,195 +21,256 @@ use splitbrain\PHPArchive\Zip;
 if(!defined('DOKU_INC')) die();
 
 class helper_plugin_structodt extends DokuWiki_Plugin {
+
     /**
-     * Generate temporary file name with full path in temporary directory
+     * Generate temporary file name and ensure base directory exists
      *
      * @param string $ext
      * @return string
      */
-    public function tmpFileName($ext='') {
+    public function tmpFileName($ext = '') {
         global $conf;
-        $name = $conf['tmpdir'] . '/structodt/' . uniqid();
+
+        $baseDir = rtrim(!empty($conf['tmpdir']) ? $conf['tmpdir'] : sys_get_temp_dir(), '/') . '/structodt';
+        if (!is_dir($baseDir)) {
+            io_mkdir_p($baseDir);
+        }
+
+        $unique = bin2hex(random_bytes(8)) . '_' . uniqid();
+        $name = $baseDir . '/' . $unique;
+
         if ($ext) {
-            $name .= ".$ext";
+            $name .= '.' . ltrim($ext, '.');
         }
         return $name;
     }
 
     /**
      * Render ODT file from template
-     *
-     * @param $template
-     * @param $schemas
-     * @param $pid
-     *
-     * @return string|bool
-     * @throws \splitbrain\PHPArchive\ArchiveIOException
-     * @throws \splitbrain\PHPArchive\FileInfoException
-     * @throws Exception
      */
     public function renderODT($template, $row) {
         $template_file = mediaFN($template);
-        $tmp_dir = $this->tmpFileName() . '/';
-        if (!mkdir($tmp_dir, 0777, true)) {
-            throw new \Exception("could not create tmp dir - bad permissions?", -1);
+        if (empty($template_file) || !file_exists($template_file)) {
+            throw new \Exception("Template file not found: " . ($template_file ?: $template));
         }
 
-        $template_zip = new Zip();
-        $template_zip->open($template_file);
-        $template_zip->extract($tmp_dir);
-
-        //do replacements
-        $files = array('content.xml', 'styles.xml');
-        foreach ($files as $file) {
-            $content_file = $tmp_dir . $file;
-            $content = file_get_contents($content_file);
-            if ($content === false) {
-                $this->rmdir_recursive($tmp_dir);
-                throw new \Exception("Cannot open: $content_file");
-            }
-
-            $content = $this->replace($content, $row);
-            file_put_contents($content_file, $content);
+        // Ścieżka katalogu BEZ kończącego slash dla io_mkdir_p
+        $tmp_dir = $this->tmpFileName();
+        if (!io_mkdir_p($tmp_dir)) {
+            throw new \Exception("Could not create tmp dir: $tmp_dir - bad permissions?", -1);
         }
-
 
         $tmp_file = $this->tmpFileName('odt');
 
-        $tmp_zip = new Zip();
-        $tmp_zip->create($tmp_file);
-        foreach($this->readdir_recursive($tmp_dir) as $file) {
-            $fileInfo = FileInfo::fromPath($file);
-            $fileInfo->strip(substr($tmp_dir, 1));
-            $tmp_zip->addFile($file, $fileInfo);
-        }
-        $tmp_zip->close();
+        try {
+            $template_zip = new Zip();
+            $template_zip->open($template_file);
+            $template_zip->extract($tmp_dir . '/');
 
-        //remove temp dir
-        $this->rmdir_recursive($tmp_dir);
+            // Podmiana danych w plikach XML
+            $files = ['content.xml', 'styles.xml'];
+            foreach ($files as $file) {
+                $content_file = $tmp_dir . '/' . $file;
+                if (!file_exists($content_file)) continue;
+
+                $content = file_get_contents($content_file);
+                if ($content === false) {
+                    throw new \Exception("Cannot read: $content_file");
+                }
+
+                $content = $this->replace($content, $row);
+                file_put_contents($content_file, $content);
+            }
+
+            $tmp_zip = new Zip();
+            $tmp_zip->create($tmp_file);
+
+            $dirPrefixLen = strlen(rtrim($tmp_dir, '/\\')) + 1;
+            foreach ($this->readdir_recursive($tmp_dir) as $file) {
+                $relativePath = substr($file, $dirPrefixLen);
+                if ($relativePath === false || $relativePath === '') continue;
+                $tmp_zip->addFile($file, str_replace('\\', '/', $relativePath));
+            }
+            $tmp_zip->close();
+
+        } finally {
+            if (!empty($tmp_dir) && is_dir($tmp_dir)) {
+                $this->rmdir_recursive($tmp_dir);
+            }
+        }
 
         return $tmp_file;
     }
 
+    protected function getGotenbergUrl() {
+        $url = getenv('GOTENBERG_URL');
+        if (!empty($url)) {
+            return rtrim($url, '/');
+        }
+        $confUrl = $this->getConf('gotenberg_url');
+        if (!empty($confUrl)) {
+            return rtrim($confUrl, '/');
+        }
+        return 'http://gotenberg:3000';
+    }
+
     /**
-     * Render PDF file from template
-     *
-     * @param $template
-     * @param $schemas
-     * @param $pid
-     *
-     * @return string|bool
-     * @throws \splitbrain\PHPArchive\ArchiveIOException
-     * @throws \splitbrain\PHPArchive\FileInfoException
-     * @throws Exception
+     * Render ODT and convert it to PDF via Gotenberg LibreOffice endpoint
      */
     public function renderPDF($template, $row) {
-        $tmp_file = $this->renderODT($template, $row);
+        $odtFile = $this->renderODT($template, $row);
+        $pdfFile = $this->tmpFileName('pdf');
 
-        $wd = dirname($tmp_file);
-        $bn = basename($tmp_file);
-        $cmd = "cd $wd && HOME=$wd unoconv -f pdf $bn 2>&1";
-        exec($cmd, $output, $result_code);
-        @unlink($tmp_file); // remove odt file
-        if ($result_code != 0) {
-            throw new \Exception("PDF conversion error($result_code): " . implode('<br>', $output), -1);
-        }
-        //change extension to pdf
-        $tmp_file = substr($tmp_file, 0, -3) . 'pdf';
+        $url = $this->getGotenbergUrl() . '/forms/libreoffice/convert';
+        $ch = curl_init($url);
+        $postFields = [
+            'files' => new \CURLFile($odtFile, 'application/vnd.oasis.opendocument.text', 'document.odt')
+        ];
 
-        return $tmp_file;
-    }
+        $fp = fopen($pdfFile, 'w+');
+        curl_setopt_array($ch, [
+            CURLOPT_POST       => true,
+            CURLOPT_POSTFIELDS => $postFields,
+            CURLOPT_FILE       => $fp,
+            CURLOPT_TIMEOUT    => 120,
+        ]);
 
-    public function concatenate($rendered_pages) {
-        $tmp_file = $this->tmpFileName('pdf');
-        $cmd = "gs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile=$tmp_file ";
-        // Add each pdf file to the end of the command
-        foreach($rendered_pages as $file) {
-            $cmd .= $file.' ';
+        $success = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        fclose($fp);
+        @unlink($odtFile);
+
+        if (!$success || $httpCode !== 200) {
+            @unlink($pdfFile);
+            throw new \Exception("Gotenberg conversion failed with HTTP status code $httpCode");
         }
-        $cmd .= '2>&1';
-        exec($cmd, $output, $result_code);
-        if ($result_code != 0) {
-            throw new \Exception("PDF concatenation error($result_code): " . implode('<br>', $output), -1);
-        }
-        return $tmp_file;
+
+        return $pdfFile;
     }
 
     /**
-     * Send ODT file using range request
-     *
-     * @param $tmp_file string path of sending file
-     * @param $filename string name of sending file
-     * $param $ext odt or pdf
+     * Merge multiple PDF files into one via Gotenberg PDF engine merge endpoint
      */
-    public function sendFile($tmp_file, $filename, $ext='odt') {
-        $mime = "application/$ext";
-        header("Content-Type: $mime");
-        header("Content-Disposition: attachment; filename=\"$filename.$ext\";");
+    public function concatenate(array $files) {
+        $outputPdf = $this->tmpFileName('pdf');
+        $url = $this->getGotenbergUrl() . '/forms/pdfengines/merge';
 
-        http_sendfile($tmp_file);
+        $postFields = [];
+        $index = 0;
+        foreach ($files as $file) {
+            // Gotenberg merges in alphabetical order of the form filenames
+            $formName = sprintf('files_%04d', $index);
+            $fileName = sprintf('%04d.pdf', $index++);
+            $postFields[$formName] = new \CURLFile($file, 'application/pdf', $fileName);
+        }
 
-        $fp = @fopen($tmp_file, "rb");
-        if($fp) {
-            //we have to remove file before exit
-            define('SIMPLE_TEST', true);
-            http_rangeRequest($fp, filesize($tmp_file), $mime);
-        } else {
+        $ch = curl_init($url);
+        $fp = fopen($outputPdf, 'w+');
+        curl_setopt_array($ch, [
+            CURLOPT_POST       => true,
+            CURLOPT_POSTFIELDS => $postFields,
+            CURLOPT_FILE       => $fp,
+            CURLOPT_TIMEOUT    => 180,
+        ]);
+
+        $success = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        fclose($fp);
+
+        if (!$success || $httpCode !== 200) {
+            @unlink($outputPdf);
+            throw new \Exception("Gotenberg merge failed with HTTP status code $httpCode");
+        }
+
+        return $outputPdf;
+    }
+
+    /**
+     * Send file directly to client and delete the temporary file
+     *
+     * @param string $tmp_file Path to temporary file
+     * @param string $filename Download filename (without extension)
+     * @param string $ext File extension ('odt', 'pdf', 'zip')
+     */
+    public function sendFile($tmp_file, $filename, $ext = 'odt') {
+        if (!file_exists($tmp_file) || !is_readable($tmp_file)) {
             header("HTTP/1.0 500 Internal Server Error");
-            print "Could not read file - bad permissions?";
+            print "Could not read temporary file.";
+            return;
         }
+
+        $mimes = [
+            'odt' => 'application/vnd.oasis.opendocument.text',
+            'pdf' => 'application/pdf',
+            'zip' => 'application/zip',
+        ];
+        $mime = $mimes[$ext] ?? 'application/octet-stream';
+
+        $cleanFilename = str_replace(['"', "\r", "\n"], '', $filename);
+        $encodedFilename = rawurlencode($cleanFilename . '.' . $ext);
+
+        // Wyczyszczenie wszelkich otwartych buforów wyjściowych DokuWiki
+        while (ob_get_level()) {
+            ob_end_clean();
+        }
+
+        header("Content-Type: $mime");
+        header("Content-Disposition: attachment; filename=\"{$cleanFilename}.{$ext}\"; filename*=UTF-8''{$encodedFilename}");
+        header("Content-Length: " . filesize($tmp_file));
+        header("Cache-Control: must-revalidate, post-check=0, pre-check=0");
+        header("Pragma: public");
+
+        // Wysłanie zawartości pliku do klienta
+        readfile($tmp_file);
+
+        // Usunięcie pliku tymczasowego
+        @unlink($tmp_file);
+        exit();
     }
 
-    /**
-     * Read directory recursively
-     *
-     * @param string $path
-     * @return array of file full paths
-     */
     public function readdir_recursive($path) {
-        $directory = new \RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS);
+        if (!is_dir($path)) return [];
+        $directory = new \RecursiveDirectoryIterator($path, \RecursiveDirectoryIterator::SKIP_DOTS);
         $iterator = new \RecursiveIteratorIterator($directory);
-        $files = array();
+        $files = [];
         foreach ($iterator as $info) {
             if ($info->isFile()) {
                 $files[] = $info->getPathname();
             }
         }
-
         return $files;
     }
 
-    /**
-     * Remove director recursively
-     *
-     * @param $path
-     */
     public function rmdir_recursive($path) {
-        $directory = new RecursiveDirectoryIterator($path, RecursiveDirectoryIterator::SKIP_DOTS);
-        $iterator = new RecursiveIteratorIterator($directory,
-            RecursiveIteratorIterator::CHILD_FIRST);
-        foreach($iterator as $file) {
-            if ($file->isDir()){
+        if (empty($path) || !is_dir($path)) {
+            return;
+        }
+
+        $directory = new \RecursiveDirectoryIterator($path, \RecursiveDirectoryIterator::SKIP_DOTS);
+        $iterator = new \RecursiveIteratorIterator($directory, \RecursiveIteratorIterator::CHILD_FIRST);
+        foreach ($iterator as $file) {
+            if ($file->isDir()) {
                 @rmdir($file->getRealPath());
             } else {
                 @unlink($file->getRealPath());
             }
         }
-        rmdir($path);
+        @rmdir($path);
     }
 
-    /**
-     * @param $schemas
-     * @param Schema $first_schema
-     * @return Search
-     */
     public function getSearch($schemas, &$first_schema) {
         $search = new Search();
-        if (!empty($schemas)) foreach ($schemas as $schema) {
-            $search->addSchema($schema[0], $schema[1]);
+        if (!empty($schemas)) {
+            foreach ($schemas as $schema) {
+                $search->addSchema($schema[0], $schema[1]);
+            }
         }
         $search->addColumn('*');
-        $first_schema = $search->getSchemas()[0];
+
+        $registeredSchemas = $search->getSchemas();
+        $first_schema = !empty($registeredSchemas) ? reset($registeredSchemas) : null;
 
         $search->addColumn('%rowid%');
         $search->addColumn('%pageid%');
@@ -227,18 +288,16 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
      * @param Schema $first_schema
      * @return Value[][]
      */
-    public function getRows($schemas, &$first_schema, $filters=array())
-    {
+    public function getRows($schemas, &$first_schema, $filters = []) {
         $search = $this->getSearch($schemas, $first_schema);
         foreach ($filters as $filter) {
             $colname = $filter[0];
-            $value = $filter[2];
-            $comp = $filter[1];
-            $op = $filter[3];
+            $comp    = $filter[1] ?? '=';
+            $value   = $filter[2] ?? '';
+            $op      = $filter[3] ?? 'AND';
             $search->addFilter($colname, $value, $comp, $op);
         }
-        $result = $search->execute();
-        return $result;
+        return $search->getRows();
     }
 
     /**
@@ -249,9 +308,10 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
      * @return Value[]|null
      */
     public function getRow($table, $pid, $rev, $rid) {
-        // second value of schema array is alias. ignore it for now
         $schema = [$table, ''];
+        $ignore = null;
         $search = $this->getSearch([$schema], $ignore);
+
         if (AccessTable::isTypePage($pid, $rev)) {
             $search->addFilter('%pageid%', $pid, '=');
         } elseif (AccessTable::isTypeSerial($pid, $rev)) {
@@ -260,96 +320,98 @@ class helper_plugin_structodt extends DokuWiki_Plugin {
         } else {
             $search->addFilter('%rowid%', $rid, '=');
         }
-        $result = $search->execute();
-        return $result[0];
+
+        $result = $search->getRows();
+        return $result[0] ?? null;
     }
 
-    /**
-     * Perform $content replacements basing on $row Values
-     *
-     * @param string $content
-     * @param Value[] $row
-     * @return string
-     */
     public function replace($content, $row) {
         /** @var Value $value */
         foreach ($row as $value) {
             $label = $value->getColumn()->getLabel();
-            $pattern = '/@@' . preg_quote($label) . '(?:\[(\d+)\])?@@/';
+            $pattern = '/@@' . preg_quote($label, '/') . '(?:\[(\d+)\])?@@/';
+
             $content = preg_replace_callback($pattern, function($matches) use ($value) {
                 $dvalue = $value->getDisplayValue();
+
+                // Obsługa indeksowania tablic @@kolumna[0]@@
                 if (isset($matches[1])) {
                     $index = (int)$matches[1];
                     if (!is_array($dvalue)) {
-                        $dvalue = array_map('trim', explode('|', $dvalue));
+                        $dvalue = array_map('trim', explode('|', (string)$dvalue));
                     }
                     if (isset($dvalue[$index])) {
-                        return $dvalue[$index];
+                        return htmlspecialchars((string)$dvalue[$index], ENT_XML1, 'UTF-8');
                     }
                     return 'Array: index out of bound';
-                } elseif (is_array($dvalue)) {
-                    return implode(',', $dvalue);
-                } elseif ($value->getColumn()->getType() instanceof Wiki) {
-                    // Create the parser and handler
-                    $Parser = new Parser(new Doku_Handler());
+                }
 
-                    // add default modes
-                    $std_modes = array('linebreak', 'eol');
+                if (is_array($dvalue)) {
+                    $escaped = array_map(function($item) {
+                        return htmlspecialchars((string)$item, ENT_XML1, 'UTF-8');
+                    }, $dvalue);
+                    return implode(', ', $escaped);
+                }
 
-                    foreach($std_modes as $m){
-                        $class = 'dokuwiki\\Parsing\\ParserMode\\'.ucfirst($m);
+                // Obsługa składni Wiki
+                if ($value->getColumn()->getType() instanceof Wiki) {
+                    $Parser = new Parser(new \Doku_Handler());
+                    $std_modes = ['linebreak', 'eol'];
+                    $modes = [];
+
+                    foreach ($std_modes as $m) {
+                        $class = 'dokuwiki\\Parsing\\ParserMode\\' . ucfirst($m);
                         $obj   = new $class();
-                        $modes[] = array(
+                        $modes[] = [
                             'sort' => $obj->getSort(),
                             'mode' => $m,
                             'obj'  => $obj
-                        );
+                        ];
                     }
 
-                    //add modes to parser
-                    foreach($modes as $mode){
-                        $Parser->addMode($mode['mode'],$mode['obj']);
+                    foreach ($modes as $mode) {
+                        $Parser->addMode($mode['mode'], $mode['obj']);
                     }
-                    // Do the parsing
-                    $instructions = $Parser->parse($dvalue);
+
+                    $instructions = $Parser->parse((string)$dvalue);
                     $Renderer = p_get_renderer('structodt');
 
-                    // Loop through the instructions
-                    foreach ($instructions as $instruction) {
-                        // Execute the callback against the Renderer
-                        if(method_exists($Renderer, $instruction[0])){
-                            call_user_func_array(array(&$Renderer, $instruction[0]), $instruction[1] ? $instruction[1] : array());
+                    if ($Renderer) {
+                        foreach ($instructions as $instruction) {
+                            if (method_exists($Renderer, $instruction[0])) {
+                                call_user_func_array([$Renderer, $instruction[0]], $instruction[1] ?: []);
+                            }
                         }
+                        return $Renderer->doc;
                     }
-
-                    return $Renderer->doc;
                 }
-                return $dvalue;
+
+                return htmlspecialchars((string)$dvalue, ENT_XML1, 'UTF-8');
             }, $content);
         }
 
         return $content;
     }
 
-    /**
-     * @param $row
-     * @param string $template
-     * @return string
-     * @throws Exception
-     */
     public function rowTemplate($row, $template) {
         return preg_replace_callback('/\$(.*?)\$/', function ($matches) use ($row) {
-            $possibleValueTypes = array('getValue', 'getCompareValue', 'getDisplayValue', 'getRawValue');
+            $possibleValueTypes = ['getValue', 'getCompareValue', 'getDisplayValue', 'getRawValue'];
             $explode = explode('.', $matches[1], 2);
             $label = $explode[0];
             $valueType = 'getDisplayValue';
-            if (isset($explode[1]) && in_array($explode[1], $possibleValueTypes)) {
+
+            if (isset($explode[1]) && in_array($explode[1], $possibleValueTypes, true)) {
                 $valueType = $explode[1];
             }
+
             foreach ($row as $value) {
                 $column = $value->getColumn();
-                if ($column->getLabel() == $label) {
-                    return call_user_func(array($value, $valueType));
+                if ($column->getLabel() === $label) {
+                    $res = call_user_func([$value, $valueType]);
+                    if (is_array($res)) {
+                        return implode(', ', $res);
+                    }
+                    return (string)$res;
                 }
             }
             return '';

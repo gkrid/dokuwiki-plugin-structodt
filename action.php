@@ -11,29 +11,49 @@ use dokuwiki\plugin\struct\meta\Schema;
 use dokuwiki\plugin\struct\meta\Value;
 use splitbrain\PHPArchive\Zip;
 
-// must be run within Dokuwiki
-if(!defined('DOKU_INC')) die();
+if (!defined('DOKU_INC')) die();
 
 class action_plugin_structodt extends DokuWiki_Action_Plugin {
-    /**
-     * Registers a callback function for a given event
-     *
-     * @param Doku_Event_Handler $controller DokuWiki's event controller object
-     * @return void
-     */
+
+    protected static $gotenbergHealthy = null;
+
     public function register(Doku_Event_Handler $controller) {
         $controller->register_hook('PLUGIN_STRUCT_CONFIGPARSER_UNKNOWNKEY', 'BEFORE', $this, 'handle_struct_configparser');
-        $controller->register_hook('ACTION_ACT_PREPROCESS', 'BEFORE', $this, 'handle_action_act_prerpocess');
+        $controller->register_hook('ACTION_ACT_PREPROCESS', 'BEFORE', $this, 'handle_action_act_preprocess');
     }
 
-    /**
-     * Add "template" config key
-     *
-     * @param Doku_Event $event  event object by reference
-     * @param mixed      $param  [the parameters passed as fifth argument to register_hook() when this
-     *                           handler was registered]
-     * @return void
-     */
+    protected function getGotenbergUrl() {
+        $url = getenv('GOTENBERG_URL');
+        if (!empty($url)) {
+            return rtrim($url, '/');
+        }
+        $confUrl = $this->getConf('gotenberg_url');
+        if (!empty($confUrl)) {
+            return rtrim($confUrl, '/');
+        }
+        return 'http://gotenberg:3000';
+    }
+
+    protected function isGotenbergHealthy() {
+        if (self::$gotenbergHealthy !== null) {
+            return self::$gotenbergHealthy;
+        }
+
+        $url = $this->getGotenbergUrl() . '/health';
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 2,
+            CURLOPT_CONNECTTIMEOUT => 2,
+            CURLOPT_NOBODY         => true,
+        ]);
+        curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        self::$gotenbergHealthy = ($code >= 200 && $code < 300);
+        return self::$gotenbergHealthy;
+    }
 
     public function handle_struct_configparser(Doku_Event &$event, $param) {
         $keys = ['template', 'pdf', 'hideform', 'filename'];
@@ -52,20 +72,10 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
                 break;
             case 'pdf':
                 $event->data['config'][$key] = (bool) $val;
-                if ($event->data['config']) {
-                    //check for "unoconv"
-                    $val = shell_exec('command -v unoconv');
-                    if (empty($val)) {
-                        msg('Cannot locate "unoconv". Falling back to ODT mode.', 0);
+                if ($event->data['config'][$key]) {
+                    if (!$this->isGotenbergHealthy()) {
+                        msg('Cannot connect to Gotenberg server at ' . $this->getGotenbergUrl() . '. Falling back to ODT mode.', 0);
                         $event->data['config'][$key] = false;
-                        break;
-                    }
-                    //check for "ghostscript"
-                    $val = shell_exec('command -v ghostscript');
-                    if (empty($val)) {
-                        msg('Cannot locate "ghostscript". Falling back to ODT mode.', 0);
-                        $event->data['config'][$key] = false;
-                        break;
                     }
                 }
                 break;
@@ -78,20 +88,9 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         }
     }
 
-    /**
-     * Handle odt export
-     *
-     * @param Doku_Event $event event object by reference
-     * @param mixed $param [the parameters passed as fifth argument to register_hook() when this
-     *                           handler was registered]
-     * @return void
-     * @throws \splitbrain\PHPArchive\ArchiveIOException
-     * @throws \splitbrain\PHPArchive\FileInfoException
-     */
-
-    public function handle_action_act_prerpocess(Doku_Event &$event, $param) {
+    public function handle_action_act_preprocess(Doku_Event &$event, $param) {
         global $INPUT;
-        if ($event->data != 'structodt') return;
+        if ($event->data !== 'structodt') return;
 
         $method = 'action_' . $INPUT->str('action');
         if (method_exists($this, $method)) {
@@ -99,71 +98,88 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         }
     }
 
-    protected function render_single($row, $templates, $ext='pdf') {
+    protected function parseTemplates($raw): array {
+        if (empty($raw)) return [];
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded)) {
+            return array_filter(array_map('trim', $decoded));
+        }
+        return array_filter(array_map('trim', explode(',', $raw)));
+    }
+
+    protected function render_single($row, array $templates, $ext = 'pdf'): string {
         global $ID;
-        /**
-         * @var \helper_plugin_structodt
-         */
+        /** @var \helper_plugin_structodt $helper */
         $helper = plugin_load('helper', 'structodt');
 
+        if (empty($templates)) {
+            throw new \Exception('No templates specified for rendering');
+        }
+
         $rendered_pages = [];
+        $tmp_file = null;
+
         try {
             foreach ($templates as $template) {
                 $template = $helper->rowTemplate($row, $template);
                 $resolver = new MediaResolver($ID);
                 $template = $resolver->resolveId($template);
-                if ($template != '' && media_exists($template, '', false)) {
+
+                if ($template !== '' && media_exists($template, '', false)) {
                     $mimetype = mimetype($template);
-                    // pdf templates are available only in pdf output format
-                    if ($mimetype[0] == 'pdf' && $ext == 'pdf') {
+                    if ($mimetype[0] === 'pdf' && $ext === 'pdf') {
                         $rendered_page = $helper->tmpFileName('pdf');
                         copy(mediaFN($template), $rendered_page);
                         $rendered_pages[] = $rendered_page;
-                    } elseif ($mimetype[0] == 'odt') {
+                    } elseif ($mimetype[0] === 'odt') {
                         $method = 'render' . strtoupper($ext);
+                        if (!method_exists($helper, $method)) {
+                            throw new \Exception("Unsupported export format: $ext");
+                        }
                         $rendered_pages[] = $helper->$method($template, $row);
                     } else {
-                        throw new \Exception('unknown template file format');
+                        throw new \Exception('Unknown template file format: ' . $template);
                     }
                 }
             }
+
+            if (empty($rendered_pages)) {
+                throw new \Exception('No valid template files could be found or rendered.');
+            }
+
             if (count($rendered_pages) > 1) {
                 $tmp_file = $helper->concatenate($rendered_pages);
-                foreach ($rendered_pages as $page) {
-                    @unlink($page);
-                }
             } else {
                 $tmp_file = $rendered_pages[0];
             }
-        } catch (\Exception $e) {
-            foreach ($rendered_pages as $page) {
-                @unlink($page);
+
+            return $tmp_file;
+
+        } finally {
+            if (count($rendered_pages) > 1 || $tmp_file === null) {
+                foreach ($rendered_pages as $page) {
+                    @unlink($page);
+                }
             }
-            msg($e->getMessage(), -1);
         }
-        return $tmp_file;
     }
 
-    /**
-     * Render file
-     */
     public function action_render() {
         global $INPUT;
         $extensions = ['pdf', 'odt'];
 
-        /**
-         * @var \helper_plugin_structodt
-         */
+        /** @var \helper_plugin_structodt $helper */
         $helper = plugin_load('helper', 'structodt');
 
-        $templates = json_decode($INPUT->str('template'));
+        $templates = $this->parseTemplates($INPUT->str('template'));
         $ext = $INPUT->str('filetype');
-        if (!in_array($ext, $extensions)) {
-            msg("Unknown file extension: $ext. Avaliable extensions: " . implode(', ', $extensions), -1);
+
+        if (!in_array($ext, $extensions, true)) {
+            msg("Unknown file extension: $ext. Available extensions: " . implode(', ', $extensions), -1);
             return false;
         }
-        if (count($templates) > 1 && $ext != 'pdf') {
-            msg("Multiple templates are available only for pdf format.", -1);
+        if (count($templates) > 1 && $ext !== 'pdf') {
+            msg("Multiple templates are available only for PDF format.", -1);
             return false;
         }
 
@@ -176,78 +192,101 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
         try {
             $row = $helper->getRow($schema, $pid, $rev, $rid);
             if (is_null($row)) {
-                throw new \Exception("Row with id: $pid doesn't exists");
+                throw new \Exception("Row with id: $pid doesn't exist");
             }
+
             $tmp_file = $this->render_single($row, $templates, $ext);
+
             if (empty($filename)) {
                 $filename = empty($pid) ? $rid : noNS($pid);
             } else {
                 $filename = $helper->rowTemplate($row, $filename);
             }
+
+            $helper->sendFile($tmp_file, $filename, $ext);
+            exit();
+
         } catch (\Exception $e) {
             msg($e->getMessage(), -1);
             return false;
         }
-        $helper->sendFile($tmp_file, $filename, $ext);
-        @unlink($tmp_file);
-        exit();
     }
 
-    /**
-     * Render all files as single PDF or ZIP archive
-     */
     public function action_renderAll() {
         global $INPUT;
 
-        /**
-         * @var \helper_plugin_structodt
-         */
+        /** @var \helper_plugin_structodt $helper */
         $helper = plugin_load('helper', 'structodt');
 
         $template_string = htmlspecialchars_decode($INPUT->str('template_string'));
-        $templates = json_decode($template_string);
+        $templates = $this->parseTemplates($template_string);
         $schemas = $INPUT->arr('schema');
         $filter = $INPUT->arr('filter');
         $format = $INPUT->str('format', 'zip');
         $filename = $INPUT->str('filename');
 
-        /** @var Schema $first_schema */
-        $rows = $helper->getRows($schemas, $first_schema, $filter);
         $files = [];
-        /** @var Value $row */
-        $i = 1;
-        foreach ($rows as $row) {
-            $tmp_file = $this->render_single($row, $templates);
-            $tmp_filename = empty($filename) ? $i++ : $helper->rowTemplate($row, $filename);
-            $files[$tmp_filename] = $tmp_file;
-        }
+        $tmp_file = null;
 
-        //join files
         try {
-            if ($format == 'pdf') {
+            /** @var Schema|null $first_schema */
+            $rows = $helper->getRows($schemas, $first_schema, $filter);
+            if (empty($rows)) {
+                msg('No records found to export.', 0);
+                return false;
+            }
+
+            $usedNames = [];
+            $i = 1;
+            foreach ($rows as $row) {
+                $page_file = $this->render_single($row, $templates);
+
+                $baseName = empty($filename) ? (string)$i : $helper->rowTemplate($row, $filename);
+                if (empty($baseName)) {
+                    $baseName = (string)$i;
+                }
+
+                $targetName = $baseName;
+                $counter = 1;
+                while (isset($usedNames[$targetName])) {
+                    $targetName = $baseName . '_' . $counter++;
+                }
+                $usedNames[$targetName] = true;
+
+                $files[$targetName] = $page_file;
+                $i++;
+            }
+
+            if ($format === 'pdf') {
                 $tmp_file = $helper->concatenate($files);
-            } elseif ($format == 'zip') {
+            } elseif ($format === 'zip') {
                 $tmp_file = $helper->tmpFileName('zip');
                 $archive = new Zip();
                 $archive->create($tmp_file);
-                foreach ($files as $filename => $file) {
-                    $archive->addFile($file, $filename . '.pdf');
+                foreach ($files as $name => $file) {
+                    $archive->addFile($file, $name . '.pdf');
                 }
                 $archive->close();
+            } else {
+                throw new \Exception("Unsupported export format: $format");
             }
+
+            $exportLabel = ($first_schema instanceof Schema) ? $first_schema->getTranslatedLabel() : 'export';
+            $helper->sendFile($tmp_file, $exportLabel, $format);
+            exit();
+
         } catch (\Exception $e) {
             msg($e->getMessage(), -1);
+            if ($tmp_file && file_exists($tmp_file)) {
+                @unlink($tmp_file);
+            }
             return false;
         } finally {
             foreach ($files as $file) {
-                @unlink($file);
+                if ($file && file_exists($file)) {
+                    @unlink($file);
+                }
             }
         }
-        $filename = $first_schema->getTranslatedLabel();
-        $helper->sendFile($tmp_file, $filename, $format);
-        @unlink($tmp_file);
-        exit();
     }
 }
-
-// vim:ts=4:sw=4:et:

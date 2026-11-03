@@ -50,8 +50,8 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
      */
     public function startScope()
     {
-        // unique identifier for this aggregation
-        $this->renderer->info['struct_table_hash'] = md5(var_export($this->data, true));
+        $hash = md5(var_export($this->data, true));
+        $this->renderer->info['struct_table_hash'] = $hash;
 
         if ($this->mode != 'xhtml') return;
 
@@ -59,25 +59,24 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
 
         $config = $this->searchConfig->getConf();
         if (isset($config['filter'])) unset($config['filter']);
-        $config = hsc(json_encode($config));
+        $config = hsc(json_encode($config, JSON_THROW_ON_ERROR));
+
+        $classes = $this->getScopeClasses();
+        $classes[] = 'structaggregationeditor';
+        $classes[] = 'structodt';
+        $classes = implode(' ', $classes);
 
         $filetype = $this->pdf ? 'pdf' : 'odt';
         $template = hsc(json_encode($this->template));
 
-        $hideform = '';
-        if ($this->hideform) {
-            $hideform = 'hideform';
-        }
-
         $filename = hsc($this->filename);
-        // wrapping div
-        $this->renderer->doc .= "<div class=\"structaggregation structaggregationeditor structodt $hideform\"
-                                    data-schema=\"$table\" data-searchconf=\"$config\"
-                                    data-template=\"$template\" data-filetype=\"$filetype\"
-                                    data-filename=\"$filename\"'>";
 
-        // unique identifier for this aggregation
-        $this->renderer->info['struct_table_hash'] = md5(var_export($this->data, true));
+        $this->renderer->doc .= "<div id=\"$hash\"
+                                      class=\"$classes\"
+                                      data-schema=\"$table\" data-searchconf=\"$config\"
+                                      data-template=\"$template\" data-filetype=\"$filetype\"
+                                      data-filename=\"$filename\"'>";
+
     }
 
     /**
@@ -89,7 +88,7 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
         parent::renderExportControls();
 
         if($this->mode != 'xhtml') return;
-        if(!$this->resultCount) return;
+        if (!$this->searchConfig->getCount()) return;
 
         // FIXME apply dynamic filters
         $urlParameters = array(
@@ -98,6 +97,7 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
             'template_string' => hsc(json_encode($this->template)),
             'filename' => $this->filename
         );
+
 
         foreach($this->data['schemas'] as $key => $schema) {
             $urlParameters['schema[' . $key . '][0]'] = $schema[0];
@@ -119,14 +119,14 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
 
         $href = wl($ID, $urlParameters);
         $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_zip" style="margin-left: ' . $margin . 'em;">' .
-            $this->helper_structodt->getLang('btn_downloadAll') .
+            $this->helper_structodt->getLang('btn_downloadAll_zip') .
         '</a>';
 
         if ($this->pdf) {
             $urlParameters['format'] = 'pdf';
             $href = wl($ID, $urlParameters);
-            $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_pdf" style="margin-left: ' . $margin + 11 . 'em;">' .
-                $this->helper_structodt->getLang('btn_downloadAll') .
+            $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_pdf" style="margin-left: ' . $margin + 15 . 'em;">' .
+                $this->helper_structodt->getLang('btn_downloadAll_pdf') .
                 '</a>';
         }
     }

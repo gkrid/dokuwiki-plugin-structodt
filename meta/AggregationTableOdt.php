@@ -32,7 +32,7 @@ class AggregationTableOdt extends AggregationTable {
         parent::__construct($id, $mode, $renderer, $searchConfig);
         $conf = $searchConfig->getConf();
         $this->template = $conf['template'];
-        $this->pdf = $conf['pdf'];
+        $this->pdf = $conf['pdf'] ?? false;
         $this->helper_structodt = plugin_load('helper', 'structodt');
     }
 
@@ -46,15 +46,21 @@ class AggregationTableOdt extends AggregationTable {
         // unique identifier for this aggregation
         $this->renderer->info['struct_table_hash'] = md5(var_export($this->data, true));
 
-        if ($this->mode != 'xhtml') return;
+        if ($this->mode == 'xhtml') {
+            $classes = $this->getScopeClasses();
+            $classes[] = 'structodt';
 
-        $table = $this->columns[0]->getTable();
+            $hash = $this->renderer->info['struct_table_hash'] ?? '';
+            $id = $hash ? " id=\"$hash\" " : '';
 
-        $filetype = $this->pdf ? 'pdf' : 'odt';
+            $table = $this->columns[0]->getTable();
+            $filetype = $this->pdf ? 'pdf' : 'odt';
 
-        // wrapping div
-        $this->renderer->doc .= '<div class="structaggregation structodt" data-schema="' . $table . '"
-                                    data-template="' . $this->template . '" data-filetype="' . $filetype . '">';
+            $this->renderer->doc .= '<' . $this->tagName .  $id . ' class="' . implode(' ', $classes) . '"
+                data-schema="' . $table . '"
+                data-template="' . $this->template . '"
+                data-filetype="' . $filetype . '">';
+        }
     }
 
     /**
@@ -65,9 +71,9 @@ class AggregationTableOdt extends AggregationTable {
 
         parent::renderExportControls();
 
-        if($this->mode != 'xhtml') return;
-        if(!$this->data['pdf']) return;
-        if(!$this->resultCount) return;
+        if ($this->mode != 'xhtml') return;
+        if (!$this->data['pdf']) return;
+        if (!$this->searchConfig->getCount()) return;
 
         // FIXME apply dynamic filters
         $urlParameters = array(
@@ -89,11 +95,20 @@ class AggregationTableOdt extends AggregationTable {
 
         $href = wl($ID, $urlParameters);
 
-        $style='';
+        $margin = 0;
         if (!empty($this->data['csv'])) {
-            $style='style="margin-left: 10em;"';
+            $margin = 10;
         }
 
-        $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_pdf" ' . $style . '>'.$this->helper_structodt->getLang('btn_downloadAll').'</a>';
+        $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_pdf" style="margin-left: ' . $margin . 'em;">'.$this->helper_structodt->getLang('btn_downloadAll_pdf').'</a>';
+
+        if ($this->pdf) {
+            $urlParameters['format'] = 'pdf';
+            $href = wl($ID, $urlParameters);
+            $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_pdf" style="margin-left: ' . $margin + 15 . 'em;">' .
+                $this->helper_structodt->getLang('btn_downloadAll_pdf') .
+                '</a>';
+        }
+
     }
 }
