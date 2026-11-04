@@ -13,6 +13,9 @@ class AggregationTableOdt extends AggregationTable {
     /** @var bool download rendered files as PDFs */
     protected $pdf;
 
+    /** @var  string File name */
+    protected $filename;
+
     /**
      * @var \helper_plugin_structodt
      */
@@ -33,6 +36,7 @@ class AggregationTableOdt extends AggregationTable {
         $conf = $searchConfig->getConf();
         $this->template = $conf['template'];
         $this->pdf = $conf['pdf'] ?? false;
+        $this->filename = $conf['filename'] ?? '';
         $this->helper_structodt = plugin_load('helper', 'structodt');
     }
 
@@ -55,11 +59,14 @@ class AggregationTableOdt extends AggregationTable {
 
             $table = $this->columns[0]->getTable();
             $filetype = $this->pdf ? 'pdf' : 'odt';
+            $template = hsc(json_encode($this->template));
+            $filename = hsc($this->filename);
 
             $this->renderer->doc .= '<' . $this->tagName .  $id . ' class="' . implode(' ', $classes) . '"
                 data-schema="' . $table . '"
-                data-template="' . $this->template . '"
-                data-filetype="' . $filetype . '">';
+                data-template="' . $template . '"
+                data-filetype="' . $filetype . '"
+                data-filename="' . $filename . '">';
         }
     }
 
@@ -72,14 +79,16 @@ class AggregationTableOdt extends AggregationTable {
         parent::renderExportControls();
 
         if ($this->mode != 'xhtml') return;
-        if (!$this->data['pdf']) return;
         if (!$this->searchConfig->getCount()) return;
+        if (!$this->pdf) return;  // export all is only avaliable in PDF mode
+
 
         // FIXME apply dynamic filters
         $urlParameters = array(
             'do' => 'structodt',
             'action' => 'renderAll',
-            'template_string' => $this->template
+            'template_string' => hsc(json_encode($this->template)),
+            'filename' => $this->filename
         );
 
         foreach($this->data['schemas'] as $key => $schema) {
@@ -93,6 +102,7 @@ class AggregationTableOdt extends AggregationTable {
             }
         }
 
+
         $href = wl($ID, $urlParameters);
 
         $margin = 0;
@@ -100,7 +110,7 @@ class AggregationTableOdt extends AggregationTable {
             $margin = 10;
         }
 
-        $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_pdf" style="margin-left: ' . $margin . 'em;">'.$this->helper_structodt->getLang('btn_downloadAll_pdf').'</a>';
+        $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_zip" style="margin-left: ' . $margin . 'em;">'.$this->helper_structodt->getLang('btn_downloadAll_zip').'</a>';
 
         if ($this->pdf) {
             $urlParameters['format'] = 'pdf';

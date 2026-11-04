@@ -16,6 +16,9 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
     /** @var bool hide the form for global and local structs */
     protected $hideform;
 
+    /** @var  string File name */
+    protected $filename;
+
     /**
      * @var \helper_plugin_structodt
      */
@@ -89,6 +92,7 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
 
         if($this->mode != 'xhtml') return;
         if (!$this->searchConfig->getCount()) return;
+        if (!$this->pdf) return;  // export all is only avaliable in PDF mode
 
         // FIXME apply dynamic filters
         $urlParameters = array(
@@ -110,14 +114,13 @@ class AggregationEditorTableOdt extends AggregationEditorTable {
             }
         }
 
-
+        $href = wl($ID, $urlParameters);
 
         $margin=0;
         if (!empty($this->data['csv'])) {
             $margin = 10;
         }
 
-        $href = wl($ID, $urlParameters);
         $this->renderer->doc .= '<a href="' . $href . '" class="export mediafile mf_zip" style="margin-left: ' . $margin . 'em;">' .
             $this->helper_structodt->getLang('btn_downloadAll_zip') .
         '</a>';
