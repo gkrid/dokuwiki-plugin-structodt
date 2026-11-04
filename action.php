@@ -257,6 +257,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
                 $i++;
             }
 
+            // Create target bundle
             if ($format === 'pdf') {
                 $tmp_file = $helper->concatenate($files);
             } elseif ($format === 'zip') {
@@ -271,7 +272,17 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
                 throw new \Exception("Unsupported export format: $format");
             }
 
+            // Intermediate files are no longer needed - unlink them immediately before exit/stream
+            foreach ($files as $file) {
+                if ($file && file_exists($file)) {
+                    @unlink($file);
+                }
+            }
+            $files = [];
+
             $exportLabel = ($first_schema instanceof Schema) ? $first_schema->getTranslatedLabel() : 'export';
+
+            // sendFile sends headers, streams the file, deletes $tmp_file and calls exit()
             $helper->sendFile($tmp_file, $exportLabel, $format);
             exit();
 
@@ -282,6 +293,7 @@ class action_plugin_structodt extends DokuWiki_Action_Plugin {
             }
             return false;
         } finally {
+            // Clean up any remaining intermediate files if an exception was thrown before sendFile
             foreach ($files as $file) {
                 if ($file && file_exists($file)) {
                     @unlink($file);
